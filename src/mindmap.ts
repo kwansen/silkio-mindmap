@@ -26,7 +26,11 @@ export interface MindMapNode {
 export interface MindMapOptions {
   canvas: HTMLCanvasElement
   data: MindMapNode
+  // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），默认 'left'
+  direction?: 'left' | 'right'
 }
+
+export type LayoutDirection = NonNullable<MindMapOptions['direction']>
 
 
 
@@ -36,8 +40,10 @@ export class MindMap {
   private viewport: Viewport | null = null
   private editor: TextEditor
   private edges: MindMapEdge[] = []
+  private direction: LayoutDirection
 
   constructor(options: MindMapOptions) {
+    this.direction = options.direction ?? 'left'
     this.app = new App(options.canvas)
     // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口
     this.viewport = new Viewport()
@@ -52,9 +58,9 @@ export class MindMap {
     void this.init(options.data)
   }
 
-  // 异步初始化：构造节点树 → ELK 布局 → fit 视口 → 挂载节点与连线（元函数组装）
+  // 异步初始化：构造节点树 → 布局 → fit 视口 → 挂载节点与连线（元函数组装）
   private async init(data: MindMapNode) {
-    const root = await layout(this.renderNode(data), { direction: 'left', levelGap: 80, siblingGap: 20 })
+    const root = await layout(this.renderNode(data), { direction: this.direction, levelGap: 80, siblingGap: 20 })
     this.root = root
     this.viewport!.fit(this.getBounds(root))
     this.app.add(root)
@@ -68,7 +74,7 @@ export class MindMap {
   // 文本输入后按新尺寸重新布局并渲染（元函数组装：重排 + 渲染）
   private async relayout() {
     if (!this.root || !this.viewport) return
-    await layout(this.root, { direction: 'left', levelGap: 80, siblingGap: 20 })
+    await layout(this.root, { direction: this.direction, levelGap: 80, siblingGap: 20 })
     this.app.render()
     // 布局会移动节点，编辑框必须在对齐一次，否则覆盖在旧位置上
     this.editor.reposition()
