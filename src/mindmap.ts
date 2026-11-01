@@ -119,6 +119,8 @@ export class MindMap {
       x: 0,
       y: 0,
       wrap: true,
+      // 新节点与初始节点保持一致的最大宽度约束，否则长文本会无限撑开
+      widthRange: ref.widthRange ?? [0, 200],
       text: '新节点',
       fontSize: ref.fontSize,
       fontWeight: ref.fontWeight,
