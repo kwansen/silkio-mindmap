@@ -3,6 +3,7 @@ import { Viewport } from "@silker/plugin-viewport";
 import { TextEditor } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
 import { MindMapEdge } from "./Edge";
+import { ActiveHighlight } from "./ActiveHighlight";
 
 export interface Style {
   color: string
@@ -41,6 +42,9 @@ export class MindMap {
   private editor: TextEditor
   private edges: MindMapEdge[] = []
   private direction: LayoutDirection
+  // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环
+  private active: Text | null = null
+  private highlight: ActiveHighlight
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? 'left'
@@ -52,10 +56,97 @@ export class MindMap {
     this.editor = new TextEditor({
       onInput: () => this.relayout(),
       onEditStart: (el, text) => this.bindNodeKeys(el, text),
+      // 点击仅激活（画布绘制高亮环），进入编辑由键盘或新建节点触发
+      onActivate: (text) => this.activate(text),
     })
     this.app.use(this.editor)
+    // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
+    this.highlight = new ActiveHighlight(() => this.app.renderer.viewport.scale)
+    // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
+    document.addEventListener('keydown', this.onGlobalKeydown)
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
     void this.init(options.data)
+  }
+
+  // 激活节点：更新高亮环目标并重绘，必要时平移视口保证可见
+  private activate(text: Text) {
+    this.active = text
+    this.highlight.target = text
+    this.app.render()
+    this.scrollNodeIntoView(text)
+  }
+
+  // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
+  private scrollNodeIntoView(text: Text) {
+    const vp = this.app.renderer.viewport
+    const p = text.getWorldPoint()
+    const sx = p.x * vp.scale + vp.x
+    const sy = p.y * vp.scale + vp.y
+    const right = sx + text.width * vp.scale
+    const bottom = sy + text.height * vp.scale
+    const dx = sx < 20
+      ? 20 - sx
+      : right > window.innerWidth - 20
+        ? window.innerWidth - 20 - right
+        : 0
+    const dy = sy < 20
+      ? 20 - sy
+      : bottom > window.innerHeight - 20
+        ? window.innerHeight - 20 - bottom
+        : 0
+    if (dx === 0 && dy === 0) return
+    this.app.renderer.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
+    this.app.render()
+  }
+
+  // 非编辑态的全局按键：方向键导航、Tab/Enter 新建节点、可打印字符进入编辑
+  private onGlobalKeydown = (e: KeyboardEvent) => {
+    if (this.editor.isEditing) return
+    // 仅响应画布或页面空白处的按键，页面其它控件输入不受影响
+    const target = e.target as HTMLElement
+    if (target !== document.body && target !== this.app.canvas) return
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault()
+      if (this.active) void this.createRelated(e, this.active)
+      return
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    if (e.key.startsWith('Arrow')) {
+      e.preventDefault()
+      this.navigate(e.key)
+      return
+    }
+    // 可打印字符：以该字符为新内容进入编辑（编辑框就绪后光标在末尾可继续输入）
+    if (e.key.length === 1 && this.active) {
+      e.preventDefault()
+      this.active.text = e.key
+      this.editor.start(this.active)
+      void this.relayout()
+    }
+  }
+
+  // 方向键导航：上下在兄弟间切换，左右按布局方向进入首子节点或回父节点
+  private navigate(key: string) {
+    if (!this.root) return
+    if (!this.active) {
+      this.activate(this.root)
+      return
+    }
+    const parent = this.active.parent as Text | null
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+      if (!parent) return
+      const siblings = parent.children as Text[]
+      const index = siblings.indexOf(this.active) + (key === 'ArrowUp' ? -1 : 1)
+      if (index >= 0 && index < siblings.length) this.activate(siblings[index])
+      return
+    }
+    // direction 'right' 子节点在右侧：Right 进入首子节点，Left 回父节点；direction 'left' 相反
+    const toChild = this.direction === 'right' ? key === 'ArrowRight' : key === 'ArrowLeft'
+    if (toChild) {
+      if (this.active.children.length) this.activate(this.active.children[0] as Text)
+    } else if (parent) {
+      this.activate(parent)
+    }
   }
 
   // 异步初始化：构造节点树 → 布局 → fit 视口 → 挂载节点与连线（元函数组装）
@@ -67,6 +158,8 @@ export class MindMap {
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.collectEdges(root, this.edges)
     this.app.add(this.edges)
+    // 激活高亮环最后加入，保证绘制在节点与连线之上
+    this.app.add(this.highlight)
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.render()
   }
@@ -85,14 +178,15 @@ export class MindMap {
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' || e.key === 'Enter') {
         e.preventDefault()
-        this.onKeydown(e, text)
+        void this.createRelated(e, text)
       }
     })
   }
 
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
-  private async onKeydown(e: KeyboardEvent, text: Text) {
-    console.log('[MindMap] onKeydown', e.key, 'from:', text.text)
+  // （编辑态由 bindNodeKeys 调用，激活态由 onGlobalKeydown 以合成事件调用）
+  private async createRelated(e: KeyboardEvent, text: Text) {
+    console.log('[MindMap] createRelated', e.key, 'from:', text.text)
     const isChild = e.key === 'Tab'
     const parent = isChild ? text : (text.parent as Text | null) ?? text
     const node = this.createNode(text)
@@ -109,7 +203,8 @@ export class MindMap {
     this.app.add(edge)
     this.editor.bind(node)
     await this.relayout()
-    // 手动调用公开的编辑方法，让新节点直接进入编辑状态
+    // 新节点直接进入编辑状态，并同步激活态（失焦后高亮环跟随）
+    this.activate(node)
     this.editor.start(node)
   }
 
