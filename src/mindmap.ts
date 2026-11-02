@@ -124,12 +124,14 @@ export class MindMap {
   }
 
   // 取消激活：清空高亮环与选中集合，移除常驻覆盖层（文字交还 canvas 渲染）
+  // 注意多选态没有覆盖层，editor.deactivate 是 no-op，必须主动重绘清除高亮环
   private deactivate() {
     if (!this.active && !this.selection.size) return
     this.active = null
     this.selection.clear()
     this.highlight.targets = []
     this.editor.deactivate()
+    this.app.render()
   }
 
   // 批量激活：框选结果整体进入选中态（多目标高亮环），供批量拖拽/批量删除使用
@@ -166,6 +168,14 @@ export class MindMap {
       if (!this.marquee.start && Math.hypot(e.clientX - down.sx, e.clientY - down.sy) <= 3) return
       this.marquee.start = { x: down.wx, y: down.wy }
       this.marquee.end = this.toWorld(e)
+      // 进入框选即退出单选态（覆盖层交还 canvas，多选态无编辑框），仅首帧执行一次
+      if (this.active || this.selection.size) {
+        this.active = null
+        this.selection.clear()
+        this.editor.deactivate()
+      }
+      // 拖动过程中实时应用激活样式：当前与选框相交的节点立刻高亮
+      this.highlight.targets = this.textsInRect(this.marquee.start, this.marquee.end)
       this.app.render()
     })
     window.addEventListener('mouseup', () => {
@@ -240,7 +250,7 @@ export class MindMap {
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault()
-      if (this.active) void this.deleteNode(this.active)
+      void this.deleteSelection()
       return
     }
     if (e.key.startsWith('Arrow')) {
@@ -385,9 +395,9 @@ export class MindMap {
         return
       }
       if (passive && (e.key === 'Delete' || e.key === 'Backspace')) {
-        // 激活态删除：删掉节点及其子树（编辑态下删除键交给默认文本删除）
+        // 激活态删除：删掉选中集合（单选即当前节点）及其子树（编辑态下删除键交给默认文本删除）
         e.preventDefault()
-        void this.deleteNode(text)
+        void this.deleteSelection()
         return
       }
       // 可打印字符或 IME 组合键：仅唤醒为编辑态（canvas 停止渲染文字），不吞键 ——
@@ -442,19 +452,24 @@ export class MindMap {
     this.activate(node)
   }
 
-  // 删除节点及其整个子树（根节点不可删除）：摘除子树、清理关联连线，重布局后激活父节点
-  private async deleteNode(text: Text) {
-    if (!this.root || text === this.root) return
-    // 收集子树内全部节点
+  // 删除选中节点（单选/多选统一走 selection）及其整个子树（根节点不可删除）：
+  // 摘除各子树、清理关联连线，重布局后激活第一个被删节点的存活父级（均被删时退化为根节点）
+  private async deleteSelection() {
+    if (!this.root) return
+    const targets = [...this.selection].filter(n => n !== this.root)
+    if (!targets.length) return
+    // 收集各子树内全部节点，并记住被删前各自的父级
     const subtree = new Set<Node>()
     const collect = (n: Node) => {
       subtree.add(n)
       n.children.forEach(collect)
     }
-    collect(text)
-    // 从父节点摘除子树（子孙随子树一起离开渲染树）
-    const parent = text.parent as Text
-    parent.remove(text)
+    const parents: Text[] = []
+    for (const text of targets) {
+      collect(text)
+      parents.push(text.parent as Text)
+      ;(text.parent as Text).remove(text)
+    }
     // 清理起点或终点在子树内的连线，并从渲染树移除
     const dead = this.edges.filter(e => subtree.has(e.fromNode) || subtree.has(e.toNode))
     this.edges = this.edges.filter(e => !dead.includes(e))
@@ -462,12 +477,12 @@ export class MindMap {
       const i = this.app.children.indexOf(e)
       if (i !== -1) this.app.children.splice(i, 1)
     })
-    // 清空指向被删节点的激活态，重布局后激活父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
+    // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
     this.active = null
     this.selection.clear()
     this.highlight.targets = []
     await this.relayout()
-    this.activate(parent)
+    this.activate(parents.find(p => !subtree.has(p)) ?? this.root)
   }
 
   // 节点在树中的级数（根节点为 0），由 parent 链向上回溯
