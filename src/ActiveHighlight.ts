@@ -7,6 +7,8 @@ export class ActiveHighlight extends Node {
   targets: Text[] = [];
   // 高亮颜色：激活态蓝色、编辑态紫色（由 MindMap 按覆盖层两态切换）
   color = "#3b82f6";
+  // 虚线模式：拖拽中原位节点的高亮环用虚线（区别于正常激活态实线）
+  dashed = false;
   // 线宽与圆角按视口缩放折算，保证屏幕视觉粗细恒定
   getScale: () => number;
 
@@ -20,6 +22,7 @@ export class ActiveHighlight extends Node {
     ctx.save();
     ctx.strokeStyle = this.color;
     ctx.lineWidth = 2 / scale;
+    if (this.dashed) ctx.setLineDash([5 / scale, 4 / scale]);
     for (const t of this.targets) {
       const p = t.getWorldPoint();
       ctx.beginPath();
