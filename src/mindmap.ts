@@ -70,7 +70,8 @@ export class MindMap {
   // 每个节点创建时实际使用的样式，供无级数配置时新建节点沿用参考节点样式
   private nodeStyles = new WeakMap<Text, Style>()
   // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环；
-  // 覆盖层常驻于激活节点（passive 激活态：光标透明），打字后唤醒为编辑态（飞书模型）
+  // 覆盖层常驻于激活节点（passive 激活态：空覆盖层，文字仍由 canvas 渲染，视觉零抖动），
+  // 打字唤醒为编辑态：canvas 停止渲染、空覆盖层成为输入缓冲（输入替换节点文本）；点击唤醒则填入节点文本正常编辑
   private active: Text | null = null
   private highlight: ActiveHighlight
 
@@ -162,7 +163,7 @@ export class MindMap {
       this.navigate(e.key)
       return
     }
-    // 打字或 IME 组合：重新聚焦常驻覆盖层并全选，默认输入/组合直接落在其上（不吞键，IME 首字符不丢）
+    // 打字或 IME 组合：重新聚焦常驻覆盖层并唤醒编辑态，默认输入/组合直接落在其上（不吞键，IME 首字符不丢）
     if ((e.key.length === 1 || e.keyCode === 229 || e.key === 'Process') && this.active) {
       this.editor.focusForTyping()
     }
@@ -267,16 +268,19 @@ export class MindMap {
   }
 
   // 编辑框按键两态机（飞书模型）——以 DOM 类名为唯一状态来源（覆盖层常驻，blur/唤醒随时切换外观）：
-  // 激活态（passive 类，光标透明）：方向键拦截并切换节点；打字/IME/点击恢复编辑态交还默认行为
-  // 编辑态：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
+  // 激活态（passive 类，文字透明、由 canvas 渲染）：方向键拦截并切换节点；打字/IME/点击唤醒编辑态交还默认行为
+  // 编辑态（覆盖层文字可见，canvas 停止渲染）：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
   private bindNodeKeys(el: HTMLDivElement, text: Text) {
-    // 唤醒为编辑态：恢复光标与选区显示（首个字符将替换全选内容），高亮环切为紫色
-    const wake = () => {
-      el.classList.remove('silker-text-passive')
+    // 唤醒为编辑态：canvas 停止渲染文字；fill 为 true（点击进入）时填入节点文本做正常编辑，
+    // 打字/IME/粘贴进入则保持空覆盖层（输入内容经 input 同步替换节点文本）
+    const wake = (fill = false) => {
+      this.editor.beginEdit(fill)
       this.setHighlightEditing(true)
     }
     el.addEventListener('keydown', (e) => {
       const passive = el.classList.contains('silker-text-passive')
+      // 临时诊断日志（复现问题后移除）
+      console.log('[SilkerKeys] keydown', JSON.stringify(e.key), 'keyCode=', e.keyCode, 'passive=', passive)
       if (passive && e.key.startsWith('Arrow')) {
         // 激活态方向键：接管为节点导航（覆盖层随 activate 转移到新节点）
         e.preventDefault()
@@ -300,8 +304,8 @@ export class MindMap {
         void this.deleteNode(text)
         return
       }
-      // 可打印字符或 IME 组合键：仅唤醒视觉（光标/选区显现），不吞键 ——
-      // 覆盖层始终可编辑，默认插入/组合直接落在其上，IME 首字符不丢
+      // 可打印字符或 IME 组合键：仅唤醒为编辑态（canvas 停止渲染文字），不吞键 ——
+      // 打字/组合直接落入空覆盖层，经 input 同步替换节点文本
       if (passive && (e.key.length === 1 || e.key === 'Process' || e.keyCode === 229)) {
         wake()
         return
@@ -317,10 +321,10 @@ export class MindMap {
         this.setHighlightEditing(false)
       }
     })
-    // 输入或点击覆盖层：从激活态唤醒为编辑态
-    el.addEventListener('input', wake)
-    el.addEventListener('compositionstart', wake)
-    el.addEventListener('mousedown', wake)
+    // 打字/组合/粘贴：空覆盖层唤醒（输入替换节点文本）；点击：填入节点文本正常编辑
+    el.addEventListener('input', () => wake())
+    el.addEventListener('compositionstart', () => wake())
+    el.addEventListener('mousedown', () => wake(true))
   }
 
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
