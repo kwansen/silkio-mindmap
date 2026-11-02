@@ -342,6 +342,8 @@ export class MindMap {
   private async createRelated(e: KeyboardEvent, text: Text) {
     console.log('[MindMap] createRelated', e.key, 'from:', text.text)
     const isChild = e.key === 'Tab'
+    // 根节点回车（无父级可建兄弟节点）忽略，不创建任何节点
+    if (!isChild && !text.parent) return
     const parent = isChild ? text : (text.parent as Text | null) ?? text
     // 新节点按级数取样式：Tab 建子节点深度 +1，Enter 建兄弟节点深度不变
     const style = this.newNodeStyle(text, this.depthOf(text) + (isChild ? 1 : 0))
