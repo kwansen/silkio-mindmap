@@ -109,6 +109,11 @@ export class MindMap {
     grabBox: { x: number; y: number; w: number; h: number };
   } | null = null;
   private dragMoved = false;
+  // 按下命中唯一激活节点（激活态覆盖层沉底，按下必落在画布）：未超阈值松手视为点击进入编辑，
+  // 而非画布 click 激活流程
+  private pressOnActive = false;
+  // 覆盖层上的按下位置（未建立拖拽上下文时用，如根节点）：mouseup 按位移区分点击与拖动
+  private overlayDown: { x: number; y: number } | null = null;
   // 拖拽合集虚影：克隆首个被拖节点样式，半透明跟随鼠标
   private dragChip: Text | null = null;
   // 拖拽中原位节点文字的原始颜色（拖拽期间转暗色，结束后恢复）
@@ -152,7 +157,38 @@ export class MindMap {
 
   // 单选激活（覆盖层 + 高亮环 + 视口跟随），语义化入口
   private activate(text: Text) {
+    // 覆盖层激活态沉底后点击会穿透到画布：唤醒编辑（mouseup）后的同节点 click 不再重复激活，
+    // 避免重建覆盖层打断刚进入的编辑
+    if (text === this.active && this.editor.isEditing && this.editor.hasFocus())
+      return;
     this.setSelection([text]);
+  }
+
+  // 点击进入编辑（覆盖层按下未拖动的 mouseup）：填入节点文本、唤醒编辑态
+  private wakeEditing() {
+    this.editor.beginEdit(true);
+    this.setHighlightEditing(true);
+  }
+
+  // 命中已选中节点时建立拖拽上下文（画布按下与覆盖层按下共用），未命中或不可拖返回 false
+  private tryStartDrag(e: MouseEvent, hit: Text | null): boolean {
+    if (!hit || !this.selection.has(hit)) return false;
+    const nodes = [...this.selection].filter((n) => n !== this.root);
+    if (!nodes.length) return false;
+    const hitP = hit.getWorldPoint();
+    this.dragState = {
+      startScreen: { x: e.clientX, y: e.clientY },
+      startWorld: this.toWorld(e),
+      nodes,
+      origins: nodes.map((n) => ({ x: n.x, y: n.y })),
+      grabNode: hit,
+      grabBox: { x: hitP.x, y: hitP.y, w: hit.width, h: hit.height },
+    };
+    this.dragMoved = false;
+    // 覆盖层激活态沉底（opacity 0 + z-index -1），按下必落在画布：单选即按在唯一激活节点上，
+    // 未超阈值松手视为点击进入编辑（多选无覆盖层，点击走 click 激活流程收敛为单选）
+    this.pressOnActive = this.selection.size === 1;
+    return true;
   }
 
   // 取消激活：清空选中集合与高亮环，移除常驻覆盖层（文字交还 canvas 渲染）
@@ -203,23 +239,12 @@ export class MindMap {
     canvas.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       const w = this.toWorld(e);
-      // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
       const hit = this.hitText(w);
+      // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
+      if (this.tryStartDrag(e, hit)) return;
+      // 未建立拖拽上下文但命中已选中节点（如根节点）：记录按下位置供 mouseup 判定点击进入编辑
       if (hit && this.selection.has(hit)) {
-        const nodes = [...this.selection].filter((n) => n !== this.root);
-        if (nodes.length) {
-          const hitP = hit.getWorldPoint();
-          this.dragState = {
-            startScreen: { x: e.clientX, y: e.clientY },
-            startWorld: w,
-            nodes,
-            origins: nodes.map((n) => ({ x: n.x, y: n.y })),
-            grabNode: hit,
-            grabBox: { x: hitP.x, y: hitP.y, w: hit.width, h: hit.height },
-          };
-          this.dragMoved = false;
-          return;
-        }
+        this.overlayDown = { x: e.clientX, y: e.clientY };
       }
       this.marqueeDown = { sx: e.clientX, sy: e.clientY, wx: w.x, wy: w.y };
     });
@@ -304,19 +329,36 @@ export class MindMap {
       );
       this.app.render();
     });
-    window.addEventListener("mouseup", () => {
+    window.addEventListener("mouseup", (e) => {
       const drag = this.dragState;
       if (drag) {
         this.dragState = null;
-        // 未超阈值的普通点击：交给 click 激活流程
-        if (!this.dragMoved) return;
+        // 未超阈值的普通点击：按在唯一激活节点上时进入编辑，其余交给 click 激活流程
+        if (!this.dragMoved) {
+          this.dragMoved = false;
+          if (this.pressOnActive) {
+            this.pressOnActive = false;
+            this.wakeEditing();
+          }
+          return;
+        }
         this.dragMoved = false;
+        this.pressOnActive = false;
         void this.commitDrop(drag.nodes, this.ghost.target);
         return;
       }
-      const down = this.marqueeDown;
+      // 覆盖层按下未建立拖拽上下文（如根节点被激活）：无位移视为点击进入编辑
+      const down = this.overlayDown;
+      this.overlayDown = null;
+      if (
+        down &&
+        Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3
+      ) {
+        this.wakeEditing();
+      }
+      const marquee = this.marqueeDown;
       this.marqueeDown = null;
-      if (!down || !this.marquee.start || !this.marquee.end) return;
+      if (!marquee || !this.marquee.start || !this.marquee.end) return;
       const { start, end } = this.marquee;
       // 复位选框（清空起止点即不再绘制）
       this.marquee.start = null;
@@ -747,10 +789,21 @@ export class MindMap {
         this.setHighlightEditing(false);
       }
     });
-    // 打字/组合/粘贴：空覆盖层唤醒（输入替换节点文本）；点击：填入节点文本正常编辑
+    // 打字/组合/粘贴：空覆盖层唤醒（输入替换节点文本）；左键按下：与画布按下共用拖拽上下文，
+    // 未超阈值松手（mouseup 统一判定）才视为点击进入编辑，避免拖拽激活节点时误触发编辑
     el.addEventListener("input", () => wake());
     el.addEventListener("compositionstart", () => wake());
-    el.addEventListener("mousedown", () => wake(true));
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) {
+        // 非左键（如右键菜单粘贴前）保持原行为：立即唤醒
+        wake(true);
+        return;
+      }
+      // 覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
+      if (!this.tryStartDrag(e, this.hitText(this.toWorld(e)))) {
+        this.overlayDown = { x: e.clientX, y: e.clientY };
+      }
+    });
   }
 
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
