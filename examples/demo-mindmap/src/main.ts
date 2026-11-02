@@ -24,7 +24,7 @@ const levelStyles: Style[] = [
     fontWeight: 500,
     fontFamily: "sans-serif",
     radius: 6,
-    borderColor: "#60a5fa",
+    borderColor: "",
     borderWidth: 0,
     lineHeight: 1.4,
     padding: [6, 16],
