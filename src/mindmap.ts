@@ -1,4 +1,5 @@
 import { App, Text } from "@silker/core";
+import type { Node } from "@silker/core";
 import { Viewport } from "@silker/plugin-viewport";
 import { TextEditor } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
@@ -51,6 +52,10 @@ export interface MindMapOptions {
 
 export type LayoutDirection = NonNullable<MindMapOptions['direction']>
 
+// 高亮环两态颜色：激活（未编辑）蓝色，编辑紫色
+const ACTIVE_COLOR = '#3b82f6'
+const EDITING_COLOR = '#a855f7'
+
 
 
 export class MindMap {
@@ -82,6 +87,8 @@ export class MindMap {
       onEditStart: (el, text) => this.bindNodeKeys(el, text),
       // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
       onActivate: (text) => this.activate(text),
+      // 失焦切回激活态视觉时同步高亮环颜色
+      onEditEnd: () => this.setHighlightEditing(false),
     })
     this.app.use(this.editor)
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
@@ -96,9 +103,16 @@ export class MindMap {
   private activate(text: Text) {
     this.active = text
     this.highlight.target = text
+    this.highlight.color = ACTIVE_COLOR
     this.app.render()
     this.editor.start(text, { passive: true })
     this.scrollNodeIntoView(text)
+  }
+
+  // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
+  private setHighlightEditing(editing: boolean) {
+    this.highlight.color = editing ? EDITING_COLOR : ACTIVE_COLOR
+    this.app.render()
   }
 
   // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
@@ -138,6 +152,11 @@ export class MindMap {
       return
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      if (this.active) void this.deleteNode(this.active)
+      return
+    }
     if (e.key.startsWith('Arrow')) {
       e.preventDefault()
       this.navigate(e.key)
@@ -251,8 +270,11 @@ export class MindMap {
   // 激活态（passive 类，光标透明）：方向键拦截并切换节点；打字/IME/点击恢复编辑态交还默认行为
   // 编辑态：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
   private bindNodeKeys(el: HTMLDivElement, text: Text) {
-    // 唤醒为编辑态：恢复光标与选区显示（首个字符将替换全选内容）
-    const wake = () => el.classList.remove('silker-text-passive')
+    // 唤醒为编辑态：恢复光标与选区显示（首个字符将替换全选内容），高亮环切为紫色
+    const wake = () => {
+      el.classList.remove('silker-text-passive')
+      this.setHighlightEditing(true)
+    }
     el.addEventListener('keydown', (e) => {
       const passive = el.classList.contains('silker-text-passive')
       if (passive && e.key.startsWith('Arrow')) {
@@ -272,6 +294,12 @@ export class MindMap {
         void this.createRelated(e, text)
         return
       }
+      if (passive && (e.key === 'Delete' || e.key === 'Backspace')) {
+        // 激活态删除：删掉节点及其子树（编辑态下删除键交给默认文本删除）
+        e.preventDefault()
+        void this.deleteNode(text)
+        return
+      }
       // 可打印字符或 IME 组合键：仅唤醒视觉（光标/选区显现），不吞键 ——
       // 覆盖层始终可编辑，默认插入/组合直接落在其上，IME 首字符不丢
       if (passive && (e.key.length === 1 || e.key === 'Process' || e.keyCode === 229)) {
@@ -283,9 +311,10 @@ export class MindMap {
         // 覆盖层常驻：节点切换由 activate → editor.start 完成卸载重建，无需先失焦
         void this.createRelated(e, text)
       } else if (e.key === 'Enter' || e.key === 'Escape') {
-        // 阻止换行，提交 = 切回激活态视觉（覆盖层保持挂载可编辑，IME 不被打断）
+        // 阻止换行，提交 = 切回激活态视觉（覆盖层保持挂载可编辑，IME 不被打断），高亮环切回蓝色
         e.preventDefault()
         this.editor.enterPassive()
+        this.setHighlightEditing(false)
       }
     })
     // 输入或点击覆盖层：从激活态唤醒为编辑态
@@ -319,6 +348,33 @@ export class MindMap {
     await this.relayout()
     // 新节点进入激活态（常驻覆盖层，打字即编辑）
     this.activate(node)
+  }
+
+  // 删除节点及其整个子树（根节点不可删除）：摘除子树、清理关联连线，重布局后激活父节点
+  private async deleteNode(text: Text) {
+    if (!this.root || text === this.root) return
+    // 收集子树内全部节点
+    const subtree = new Set<Node>()
+    const collect = (n: Node) => {
+      subtree.add(n)
+      n.children.forEach(collect)
+    }
+    collect(text)
+    // 从父节点摘除子树（子孙随子树一起离开渲染树）
+    const parent = text.parent as Text
+    parent.remove(text)
+    // 清理起点或终点在子树内的连线，并从渲染树移除
+    const dead = this.edges.filter(e => subtree.has(e.fromNode) || subtree.has(e.toNode))
+    this.edges = this.edges.filter(e => !dead.includes(e))
+    dead.forEach(e => {
+      const i = this.app.children.indexOf(e)
+      if (i !== -1) this.app.children.splice(i, 1)
+    })
+    // 清空指向被删节点的激活态，重布局后激活父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
+    this.active = null
+    this.highlight.target = null
+    await this.relayout()
+    this.activate(parent)
   }
 
   // 节点在树中的级数（根节点为 0），由 parent 链向上回溯
