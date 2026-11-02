@@ -4,7 +4,7 @@ import { Edge } from '@silker/plugin-edge'
 
 // 拖拽视觉反馈层（渲染时实时读取状态，元函数：跟随渲染）：
 // - 原位虚影：各被拖子树根的原始包围盒，虚线描边（节点本体由 opacity 降低形成透明虚影）
-// - 跟随鼠标：合集包围盒双层半透明矩形（叠放隐喻），随位移整体移动
+// - 跟随鼠标：克隆首个被拖节点（dragChip，mindmap 挂为本节点子节点）半透明跟随，样式与原节点一致
 // - 落点提示：与思维导图一致的贝塞尔连线，从命中节点边缘中点连到合集矩形边缘中点，表示可放置
 export class DragGhost extends Node {
   // 被拖子树根的原始世界包围盒列表（拖拽开始时定格）
@@ -52,26 +52,8 @@ export class DragGhost extends Node {
     for (const b of this.ghostBoxes) {
       ctx.strokeRect(b.x, b.y, b.w, b.h)
     }
-    // 跟随鼠标的合集：固定屏幕尺寸（宽高除以视口缩放，拖拽与缩放下视觉大小恒定），
-    // 双层半透明灰阶矩形（错位叠放）
-    if (this.floatBox) {
-      const w = this.floatBox.w * s
-      const h = this.floatBox.h * s
-      const f = { x: this.floatBox.x, y: this.floatBox.y, w, h }
-      const off = 6 * s
-      ctx.setLineDash([])
-      // 底层矩形（右下偏移）
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'
-      ctx.fillRect(f.x + off, f.y + off, w, h)
-      ctx.strokeStyle = 'rgba(107, 114, 128, 0.35)'
-      ctx.lineWidth = s
-      ctx.strokeRect(f.x + off, f.y + off, w, h)
-      // 顶层矩形
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)'
-      ctx.fillRect(f.x, f.y, w, h)
-      ctx.strokeStyle = 'rgba(55, 65, 81, 0.6)'
-      ctx.strokeRect(f.x, f.y, w, h)
-    }
+    // 合集虚影不再由本层绘制：克隆节点（dragChip）作为本节点子节点由 Renderer 渲染，
+    // 样式与被拖节点一致、半透明，位置由 mindmap 每帧同步
     ctx.restore()
   }
 }

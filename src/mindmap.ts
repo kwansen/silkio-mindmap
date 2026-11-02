@@ -92,9 +92,13 @@ export class MindMap {
     startWorld: { x: number; y: number }
     nodes: Text[]
     origins: { x: number; y: number }[]
-    unionBox: { x: number; y: number; w: number; h: number }
+    // 鼠标按下的节点及其原始包围盒（合集虚影克隆它并以其为跟随锚点）
+    grabNode: Text
+    grabBox: { x: number; y: number; w: number; h: number }
   } | null = null
   private dragMoved = false
+  // 拖拽合集虚影：克隆首个被拖节点样式，半透明跟随鼠标
+  private dragChip: Text | null = null
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? 'left'
@@ -184,13 +188,14 @@ export class MindMap {
       if (hit && this.selection.has(hit)) {
         const nodes = [...this.selection].filter(n => n !== this.root)
         if (nodes.length) {
+          const hitP = hit.getWorldPoint()
           this.dragState = {
             startScreen: { x: e.clientX, y: e.clientY },
             startWorld: w,
             nodes,
             origins: nodes.map(n => ({ x: n.x, y: n.y })),
-            // 首帧拖拽时定格（各子树根包围盒的并集）
-            unionBox: { x: 0, y: 0, w: 0, h: 0 },
+            grabNode: hit,
+            grabBox: { x: hitP.x, y: hitP.y, w: hit.width, h: hit.height },
           }
           this.dragMoved = false
           return
@@ -216,27 +221,27 @@ export class MindMap {
             return { x: p.x, y: p.y, w: n.width, h: n.height }
           })
           this.ghost.ghostBoxes = boxes
-          // 合集矩形：宽度取各子树根包围盒并集，高度固定为一行（首个节点的行高），不累加总高度
-          const minX = Math.min(...boxes.map(b => b.x))
-          const minY = Math.min(...boxes.map(b => b.y))
-          drag.unionBox = {
-            x: minX,
-            y: minY,
-            w: Math.max(...boxes.map(b => b.x + b.w)) - minX,
-            h: boxes[0].h,
-          }
+          // 合集虚影克隆鼠标按下的节点（框选多个时拖的是按住的那个，而非集合第一个）
+          this.dragChip = this.cloneTextStyle(drag.grabNode)
+          this.dragChip.opacity = 0.5
+          this.ghost.add(this.dragChip)
         }
-        // 节点本体不再跟随移动，由反馈层代替：合集矩形 = 原包围盒 + 拖拽位移
+        // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
         const cur = this.toWorld(e)
         const dx = cur.x - drag.startWorld.x
         const dy = cur.y - drag.startWorld.y
         this.ghost.floatBox = {
-          x: drag.unionBox.x + dx,
-          y: drag.unionBox.y + dy,
-          w: drag.unionBox.w,
-          h: drag.unionBox.h,
+          x: drag.grabBox.x + dx,
+          y: drag.grabBox.y + dy,
+          w: drag.grabBox.w,
+          h: drag.grabBox.h,
         }
-        // 候选落点实时提示（紫色环）：命中时跳过被拖子树，取其下方的真实目标
+        // 合集虚影跟随鼠标
+        if (this.dragChip) {
+          this.dragChip.x = this.ghost.floatBox!.x
+          this.dragChip.y = this.ghost.floatBox!.y
+        }
+        // 候选落点：命中时跳过被拖子树，取其下方的真实目标
         const subtree = new Set<Node>()
         const collect = (n: Node) => {
           subtree.add(n)
@@ -291,6 +296,8 @@ export class MindMap {
     // 先序遍历即渲染序（后绘制在上层），收集全部命中的文本节点后倒序取最上层
     const hits: Text[] = []
     const walk = (n: Node) => {
+      // 拖拽合集虚影是克隆节点，不参与命中
+      if (n instanceof DragGhost) return
       if (n instanceof Text) {
         // Node.hitTest 只逆变换自身矩阵，对树内嵌套节点不准；这里用完整世界矩阵换算到局部坐标再判
         const local = n.getWorldTransform().inverse().transformPoint(w)
@@ -303,6 +310,26 @@ export class MindMap {
       if (!exclude || !exclude.has(hits[i])) return hits[i]
     }
     return null
+  }
+
+  // 克隆节点样式（文本、字体、盒样式等，不含位置与层级），用于拖拽合集的透明虚影
+  private cloneTextStyle(src: Text): Text {
+    const opts: ConstructorParameters<typeof Text>[0] = {
+      text: src.text,
+      fill: src.fill,
+      stroke: src.stroke,
+      lineWidth: src.lineWidth,
+      fontSize: src.fontSize,
+      fontWeight: src.fontWeight,
+      fontFamily: src.fontFamily,
+      padding: src.padding,
+      lineHeight: src.lineHeight,
+      wrap: src.wrap,
+      widthRange: src.widthRange ? [src.widthRange[0], src.widthRange[1]] : undefined,
+      boxStyle: { ...src.boxStyle },
+    }
+    if (!src.autoWidth) opts.width = src.width
+    return new Text(opts)
   }
 
   // 落点候选判定：不做鼠标悬浮命中，按几何间距——
@@ -351,6 +378,10 @@ export class MindMap {
     this.ghost.ghostBoxes = []
     this.ghost.floatBox = null
     this.ghost.target = null
+    if (this.dragChip) {
+      this.ghost.remove(this.dragChip)
+      this.dragChip = null
+    }
     const subtree = new Set<Node>()
     const collect = (n: Node) => {
       subtree.add(n)
