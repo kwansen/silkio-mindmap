@@ -164,9 +164,12 @@ export class MindMap {
     this.setSelection([text]);
   }
 
-  // 点击进入编辑（覆盖层按下未拖动的 mouseup）：填入节点文本、唤醒编辑态
-  private wakeEditing() {
-    this.editor.beginEdit(true);
+  // 点击进入编辑（按下未拖动的 mouseup）：填入节点文本、唤醒编辑态，并把光标定位到点击处
+  private wakeEditing(e?: MouseEvent) {
+    this.editor.beginEdit(
+      true,
+      e ? { x: e.clientX, y: e.clientY } : undefined,
+    );
     this.setHighlightEditing(true);
   }
 
@@ -338,7 +341,7 @@ export class MindMap {
           this.dragMoved = false;
           if (this.pressOnActive) {
             this.pressOnActive = false;
-            this.wakeEditing();
+            this.wakeEditing(e);
           }
           return;
         }
@@ -347,14 +350,14 @@ export class MindMap {
         void this.commitDrop(drag.nodes, this.ghost.target);
         return;
       }
-      // 覆盖层按下未建立拖拽上下文（如根节点被激活）：无位移视为点击进入编辑
+      // 按下未建立拖拽上下文的已选中节点（如根节点）：无位移视为点击进入编辑
       const down = this.overlayDown;
       this.overlayDown = null;
       if (
         down &&
         Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3
       ) {
-        this.wakeEditing();
+        this.wakeEditing(e);
       }
       const marquee = this.marqueeDown;
       this.marqueeDown = null;
