@@ -77,13 +77,17 @@ export class MindMap {
   private levelStyles: Style[];
   // 每个节点创建时实际使用的样式，供无级数配置时新建节点沿用参考节点样式
   private nodeStyles = new WeakMap<Text, Style>();
-  // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环；
-  // 覆盖层常驻于激活节点（passive 激活态：空覆盖层，文字仍由 canvas 渲染，视觉零抖动），
-  // 打字唤醒为编辑态：canvas 停止渲染、空覆盖层成为输入缓冲（输入替换节点文本）；点击唤醒则填入节点文本正常编辑
-  private active: Text | null = null;
   private highlight: ActiveHighlight;
-  // 框选：左键拖拽选中的节点集合（批量拖拽/批量删除的数据基础），与单选 active 互斥
+  // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（passive：空覆盖层、
+  // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
+  // size>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
   private selection = new Set<Text>();
+  // 单选派生：多选或无选中时为 null（Tab/Enter、打字唤醒仅单选生效）
+  private get active(): Text | null {
+    return this.selection.size === 1
+      ? ([...this.selection][0] as Text)
+      : null;
+  }
   private marquee: Marquee;
   // 左键按下状态：屏幕坐标用于位移阈值判断，世界坐标作为选框起点
   private marqueeDown: {
@@ -146,36 +150,37 @@ export class MindMap {
     void this.init(options.data);
   }
 
-  // 激活节点：更新高亮环目标（单选），常驻覆盖层以激活态（光标透明）覆盖节点并聚焦，必要时平移视口
+  // 单选激活（覆盖层 + 高亮环 + 视口跟随），语义化入口
   private activate(text: Text) {
-    this.active = text;
-    this.selection = new Set([text]);
-    this.highlight.targets = [text];
-    this.highlight.color = ACTIVE_COLOR;
-    this.app.render();
-    this.editor.start(text, { passive: true });
-    this.scrollNodeIntoView(text);
+    this.setSelection([text]);
   }
 
-  // 取消激活：清空高亮环与选中集合，移除常驻覆盖层（文字交还 canvas 渲染）
-  // 注意多选态没有覆盖层，editor.deactivate 是 no-op，必须主动重绘清除高亮环
+  // 取消激活：清空选中集合与高亮环，移除常驻覆盖层（文字交还 canvas 渲染）
   private deactivate() {
-    if (!this.active && !this.selection.size) return;
-    this.active = null;
+    if (!this.selection.size) return;
     this.selection.clear();
     this.highlight.targets = [];
     this.editor.deactivate();
     this.app.render();
   }
 
-  // 批量激活：框选结果整体进入选中态（多目标高亮环），供批量拖拽/批量删除使用
+  // 批量设置选中（单选/多选统一入口）：
+  // 单选进入激活态（常驻覆盖层 + 高亮环，必要时平移视口）；多选仅多目标高亮环，无覆盖层
   private setSelection(nodes: Text[]) {
-    // 单选覆盖层（若有）退出：多选态无编辑框
-    this.editor.deactivate();
-    this.active = null;
+    if (!nodes.length) {
+      this.deactivate();
+      return;
+    }
     this.selection = new Set(nodes);
     this.highlight.targets = nodes;
     this.highlight.color = ACTIVE_COLOR;
+    if (nodes.length === 1) {
+      this.editor.start(nodes[0], { passive: true });
+      this.scrollNodeIntoView(nodes[0]);
+    } else {
+      // 多选态没有编辑框，退出可能残留的单选覆盖层
+      this.editor.deactivate();
+    }
     this.app.render();
   }
 
@@ -230,11 +235,11 @@ export class MindMap {
           ) <= 3
         )
           return;
-        // 首帧进入拖拽：退出单选覆盖层、节点本体降透明度形成原位虚影、定格各包围盒
+        // 首帧进入拖拽：退出选中态（含覆盖层）、节点本体降透明度形成原位虚影、定格各包围盒
         if (!this.dragMoved) {
           this.dragMoved = true;
-          if (this.active) {
-            this.active = null;
+          if (this.selection.size) {
+            this.selection.clear();
             this.editor.deactivate();
           }
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
@@ -287,9 +292,8 @@ export class MindMap {
         return;
       this.marquee.start = { x: down.wx, y: down.wy };
       this.marquee.end = this.toWorld(e);
-      // 进入框选即退出单选态（覆盖层交还 canvas，多选态无编辑框），仅首帧执行一次
-      if (this.active || this.selection.size) {
-        this.active = null;
+      // 进入框选即退出选中态（覆盖层交还 canvas，多选态无编辑框），仅首帧执行一次
+      if (this.selection.size) {
         this.selection.clear();
         this.editor.deactivate();
       }
@@ -461,9 +465,8 @@ export class MindMap {
       }
     }
     await this.relayout();
-    // 拖拽后保持选中：单节点回到激活态，多节点保持批量选中
-    if (nodes.length === 1) this.activate(nodes[0]);
-    else this.setSelection(nodes);
+    // 拖拽后保持选中：单选回到激活态（覆盖层），多选保持批量选中
+    this.setSelection(nodes);
   }
 
   // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）
@@ -554,32 +557,45 @@ export class MindMap {
   };
 
   // 方向键导航：上下在整棵树内按视觉位置选垂直方向最近的节点（可跨分支），左右按布局方向进入首子节点或回父节点
+  // 多选时以选集左上角节点为锚点，先收敛为单选再导航（Tab/Enter 在多选下不生效，见 onGlobalKeydown）
   private navigate(key: string) {
     if (!this.root) return;
-    if (!this.active) {
+    if (!this.selection.size) {
       this.activate(this.root);
       return;
     }
+    const current = this.active ?? this.topLeftSelection();
+    if (!this.active) this.activate(current);
     if (key === "ArrowUp" || key === "ArrowDown") {
-      this.navigateVertical(key);
+      this.navigateVertical(key, current);
       return;
     }
-    const parent = this.active.parent as Text | null;
+    const parent = current.parent as Text | null;
     // direction 'right' 子节点在右侧：Right 进入首子节点，Left 回父节点；direction 'left' 相反
     const toChild =
       this.direction === "right" ? key === "ArrowRight" : key === "ArrowLeft";
     if (toChild) {
-      if (this.active.children.length)
-        this.activate(this.active.children[0] as Text);
+      if (current.children.length)
+        this.activate(current.children[0] as Text);
     } else if (parent) {
       this.activate(parent);
     }
   }
 
+  // 选集中最靠左上角的节点：先取最上（y 最小，0.5 容差抗浮点误差），同高取最左（x 最小）
+  private topLeftSelection(): Text {
+    return [...this.selection].reduce((best, n) => {
+      const bp = best.getWorldPoint();
+      const np = n.getWorldPoint();
+      if (np.y < bp.y - 0.5) return n;
+      if (np.y <= bp.y + 0.5 && np.x < bp.x) return n;
+      return best;
+    });
+  }
+
   // 垂直导航：↑↓ 选择上/下方最近的可导航节点 —— 先取水平区间重叠者（正上/正下），
   // 无重叠时再取斜向矩形间距最近者（斜上/斜下），←→ 仍负责层级移动
-  private navigateVertical(key: "ArrowUp" | "ArrowDown") {
-    const current = this.active!;
+  private navigateVertical(key: "ArrowUp" | "ArrowDown", current: Text) {
     const cp = current.getWorldPoint();
     const cur = {
       left: cp.x,
@@ -800,7 +816,6 @@ export class MindMap {
       if (i !== -1) this.app.children.splice(i, 1);
     });
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
-    this.active = null;
     this.selection.clear();
     this.highlight.targets = [];
     await this.relayout();

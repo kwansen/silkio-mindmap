@@ -146,3 +146,5 @@ const data = {
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const mindmap = new MindMap({ canvas, data, direction: "right", levelStyles });
 mindmap.app.render();
+// 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
+(window as any).__mindmap = mindmap;
