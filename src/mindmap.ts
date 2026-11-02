@@ -5,6 +5,7 @@ import { TextEditor } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
 import { MindMapEdge } from "./Edge";
 import { ActiveHighlight } from "./ActiveHighlight";
+import { Marquee } from "./Marquee";
 
 export interface Style {
   color: string
@@ -74,6 +75,11 @@ export class MindMap {
   // 打字唤醒为编辑态：canvas 停止渲染、空覆盖层成为输入缓冲（输入替换节点文本）；点击唤醒则填入节点文本正常编辑
   private active: Text | null = null
   private highlight: ActiveHighlight
+  // 框选：左键拖拽选中的节点集合（批量拖拽/批量删除的数据基础），与单选 active 互斥
+  private selection = new Set<Text>()
+  private marquee: Marquee
+  // 左键按下状态：屏幕坐标用于位移阈值判断，世界坐标作为选框起点
+  private marqueeDown: { sx: number; sy: number; wx: number; wy: number } | null = null
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? 'left'
@@ -94,6 +100,10 @@ export class MindMap {
     this.app.use(this.editor)
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight(() => this.app.renderer.viewport.scale)
+    // 框选矩形（init 中最后 add，绘制在一切之上）
+    this.marquee = new Marquee(() => this.app.renderer.viewport.scale)
+    // 左键框选：拖拽出选框，松开后框住的节点批量激活
+    this.bindMarquee()
     // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
     document.addEventListener('keydown', this.onGlobalKeydown)
     // 点击画布空白处取消激活态（拖拽平移不触发）
@@ -102,22 +112,87 @@ export class MindMap {
     void this.init(options.data)
   }
 
-  // 激活节点：更新高亮环目标，常驻覆盖层以激活态（光标透明）覆盖节点并聚焦，必要时平移视口
+  // 激活节点：更新高亮环目标（单选），常驻覆盖层以激活态（光标透明）覆盖节点并聚焦，必要时平移视口
   private activate(text: Text) {
     this.active = text
-    this.highlight.target = text
+    this.selection = new Set([text])
+    this.highlight.targets = [text]
     this.highlight.color = ACTIVE_COLOR
     this.app.render()
     this.editor.start(text, { passive: true })
     this.scrollNodeIntoView(text)
   }
 
-  // 取消激活：清空高亮环与激活引用，移除常驻覆盖层（文字交还 canvas 渲染）
+  // 取消激活：清空高亮环与选中集合，移除常驻覆盖层（文字交还 canvas 渲染）
   private deactivate() {
-    if (!this.active) return
+    if (!this.active && !this.selection.size) return
     this.active = null
-    this.highlight.target = null
+    this.selection.clear()
+    this.highlight.targets = []
     this.editor.deactivate()
+  }
+
+  // 批量激活：框选结果整体进入选中态（多目标高亮环），供批量拖拽/批量删除使用
+  private setSelection(nodes: Text[]) {
+    // 单选覆盖层（若有）退出：多选态无编辑框
+    this.editor.deactivate()
+    this.active = null
+    this.selection = new Set(nodes)
+    this.highlight.targets = nodes
+    this.highlight.color = ACTIVE_COLOR
+    this.app.render()
+  }
+
+  // 屏幕坐标转世界坐标（视口逆变换）
+  private toWorld(e: MouseEvent) {
+    const rect = this.app.canvas.getBoundingClientRect()
+    const vp = this.app.renderer.viewport
+    return { x: (e.clientX - rect.left - vp.x) / vp.scale, y: (e.clientY - rect.top - vp.y) / vp.scale }
+  }
+
+  // 左键框选交互：按下记录起点，拖拽超阈值显示选框，松开批量激活框住（相交）的节点；
+  // 未超阈值的普通点击不处理，交给节点激活/空白取消逻辑
+  private bindMarquee() {
+    const canvas = this.app.canvas
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      const w = this.toWorld(e)
+      this.marqueeDown = { sx: e.clientX, sy: e.clientY, wx: w.x, wy: w.y }
+    })
+    window.addEventListener('mousemove', (e) => {
+      const down = this.marqueeDown
+      if (!down) return
+      // 位移超过阈值才进入框选，普通点击不画框
+      if (!this.marquee.start && Math.hypot(e.clientX - down.sx, e.clientY - down.sy) <= 3) return
+      this.marquee.start = { x: down.wx, y: down.wy }
+      this.marquee.end = this.toWorld(e)
+      this.app.render()
+    })
+    window.addEventListener('mouseup', () => {
+      const down = this.marqueeDown
+      this.marqueeDown = null
+      if (!down || !this.marquee.start || !this.marquee.end) return
+      const { start, end } = this.marquee
+      // 复位选框（清空起止点即不再绘制）
+      this.marquee.start = null
+      this.marquee.end = null
+      this.setSelection(this.textsInRect(start, end))
+    })
+  }
+
+  // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）
+  private textsInRect(a: { x: number; y: number }, b: { x: number; y: number }): Text[] {
+    if (!this.root) return []
+    const left = Math.min(a.x, b.x)
+    const right = Math.max(a.x, b.x)
+    const top = Math.min(a.y, b.y)
+    const bottom = Math.max(a.y, b.y)
+    const out: Text[] = []
+    this.collectTexts(this.root, out)
+    return out.filter(n => {
+      const p = n.getWorldPoint()
+      return p.x < right && p.x + n.width > left && p.y < bottom && p.y + n.height > top
+    })
   }
 
   // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
@@ -262,8 +337,9 @@ export class MindMap {
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.collectEdges(root, this.edges)
     this.app.add(this.edges)
-    // 激活高亮环最后加入，保证绘制在节点与连线之上
+    // 激活高亮环最后加入，保证绘制在节点与连线之上；框选矩形绘制在最顶层
     this.app.add(this.highlight)
+    this.app.add(this.marquee)
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.render()
   }
@@ -388,7 +464,8 @@ export class MindMap {
     })
     // 清空指向被删节点的激活态，重布局后激活父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
     this.active = null
-    this.highlight.target = null
+    this.selection.clear()
+    this.highlight.targets = []
     await this.relayout()
     this.activate(parent)
   }
