@@ -17,7 +17,7 @@ const style: Style = {
 
 const data: MindMapNode = {
   text: "中心主题",
-  style: { ...style, fontSize: 16, fontWeight: 200 },
+  style: { ...style, fontSize: 24, fontWeight: 400, padding: [6, 24] },
   children: [
     {
       text: "前端",

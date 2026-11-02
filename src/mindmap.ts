@@ -42,7 +42,8 @@ export class MindMap {
   private editor: TextEditor
   private edges: MindMapEdge[] = []
   private direction: LayoutDirection
-  // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环
+  // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环；
+  // 覆盖层常驻于激活节点（passive 激活态：光标透明），打字后唤醒为编辑态（飞书模型）
   private active: Text | null = null
   private highlight: ActiveHighlight
 
@@ -56,7 +57,7 @@ export class MindMap {
     this.editor = new TextEditor({
       onInput: () => this.relayout(),
       onEditStart: (el, text) => this.bindNodeKeys(el, text),
-      // 点击仅激活（画布绘制高亮环），进入编辑由键盘或新建节点触发
+      // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
       onActivate: (text) => this.activate(text),
     })
     this.app.use(this.editor)
@@ -68,11 +69,12 @@ export class MindMap {
     void this.init(options.data)
   }
 
-  // 激活节点：更新高亮环目标并重绘，必要时平移视口保证可见
+  // 激活节点：更新高亮环目标，常驻覆盖层以激活态（光标透明）覆盖节点并聚焦，必要时平移视口
   private activate(text: Text) {
     this.active = text
     this.highlight.target = text
     this.app.render()
+    this.editor.start(text, { passive: true })
     this.scrollNodeIntoView(text)
   }
 
@@ -99,9 +101,11 @@ export class MindMap {
     this.app.render()
   }
 
-  // 非编辑态的全局按键：方向键导航、Tab/Enter 新建节点、可打印字符进入编辑
+  // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
+  // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   private onGlobalKeydown = (e: KeyboardEvent) => {
-    if (this.editor.isEditing) return
+    // 覆盖层持焦时其 keydown 处理器已接管；失焦挂载态才走到这里
+    if (this.editor.isEditing && this.editor.hasFocus()) return
     // 仅响应画布或页面空白处的按键，页面其它控件输入不受影响
     const target = e.target as HTMLElement
     if (target !== document.body && target !== this.app.canvas) return
@@ -116,30 +120,24 @@ export class MindMap {
       this.navigate(e.key)
       return
     }
-    // 可打印字符：以该字符为新内容进入编辑（编辑框就绪后光标在末尾可继续输入）
-    if (e.key.length === 1 && this.active) {
-      e.preventDefault()
-      this.active.text = e.key
-      this.editor.start(this.active)
-      void this.relayout()
+    // 打字或 IME 组合：重新聚焦常驻覆盖层并全选，默认输入/组合直接落在其上（不吞键，IME 首字符不丢）
+    if ((e.key.length === 1 || e.keyCode === 229 || e.key === 'Process') && this.active) {
+      this.editor.focusForTyping()
     }
   }
 
-  // 方向键导航：上下在兄弟间切换，左右按布局方向进入首子节点或回父节点
+  // 方向键导航：上下在整棵树内按视觉位置选垂直方向最近的节点（可跨分支），左右按布局方向进入首子节点或回父节点
   private navigate(key: string) {
     if (!this.root) return
     if (!this.active) {
       this.activate(this.root)
       return
     }
-    const parent = this.active.parent as Text | null
     if (key === 'ArrowUp' || key === 'ArrowDown') {
-      if (!parent) return
-      const siblings = parent.children as Text[]
-      const index = siblings.indexOf(this.active) + (key === 'ArrowUp' ? -1 : 1)
-      if (index >= 0 && index < siblings.length) this.activate(siblings[index])
+      this.navigateVertical(key)
       return
     }
+    const parent = this.active.parent as Text | null
     // direction 'right' 子节点在右侧：Right 进入首子节点，Left 回父节点；direction 'left' 相反
     const toChild = this.direction === 'right' ? key === 'ArrowRight' : key === 'ArrowLeft'
     if (toChild) {
@@ -147,6 +145,59 @@ export class MindMap {
     } else if (parent) {
       this.activate(parent)
     }
+  }
+
+  // 垂直导航：↑↓ 选择上/下方最近的可导航节点 —— 先取水平区间重叠者（正上/正下），
+  // 无重叠时再取斜向矩形间距最近者（斜上/斜下），←→ 仍负责层级移动
+  private navigateVertical(key: 'ArrowUp' | 'ArrowDown') {
+    const current = this.active!
+    const cp = current.getWorldPoint()
+    const cur = { left: cp.x, right: cp.x + current.width, cy: cp.y + current.height / 2 }
+    const below = key === 'ArrowDown'
+    const all: Text[] = []
+    this.collectTexts(this.root!, all)
+    const cands = all.filter(n => {
+      if (n === current) return false
+      const p = n.getWorldPoint()
+      const cy = p.y + n.height / 2
+      return below ? cy > cur.cy + 0.5 : cy < cur.cy - 0.5
+    })
+    if (!cands.length) return
+    // 世界包围盒与垂直距离工具
+    const rect = (n: Text) => {
+      const p = n.getWorldPoint()
+      return { left: p.x, right: p.x + n.width, cy: p.y + n.height / 2 }
+    }
+    const distY = (n: Text) => Math.abs(rect(n).cy - cur.cy)
+    let best: Text | null = null
+    let bestScore = Infinity
+    // 第一优先：水平区间与当前节点重叠（正上/正下），垂直距离最近者
+    for (const n of cands) {
+      const r = rect(n)
+      if (r.left < cur.right && r.right > cur.left && distY(n) < bestScore) {
+        bestScore = distY(n)
+        best = n
+      }
+    }
+    // 第二优先：斜上/斜下，按 水平间距 + 垂直距离 度量取最近（列相邻性优先于微小的高度差）
+    if (best === null) {
+      for (const n of cands) {
+        const r = rect(n)
+        const dx = Math.max(0, cur.left - r.right, r.left - cur.right)
+        const d = dx + distY(n)
+        if (d < bestScore) {
+          bestScore = d
+          best = n
+        }
+      }
+    }
+    if (best) this.activate(best)
+  }
+
+  // 递归收集子树内全部文本节点（元函数：被 navigateVertical 调用）
+  private collectTexts(node: Text, out: Text[]) {
+    out.push(node)
+    node.children.forEach(child => this.collectTexts(child as Text, out))
   }
 
   // 异步初始化：构造节点树 → 布局 → fit 视口 → 挂载节点与连线（元函数组装）
@@ -173,14 +224,51 @@ export class MindMap {
     this.editor.reposition()
   }
 
-  // 直接监听编辑框按键：Tab 创建子节点、Enter 创建兄弟节点（拦截默认行为）
+  // 编辑框按键两态机（飞书模型）——以 DOM 类名为唯一状态来源（覆盖层常驻，blur/唤醒随时切换外观）：
+  // 激活态（passive 类，光标透明）：方向键拦截并切换节点；打字/IME/点击恢复编辑态交还默认行为
+  // 编辑态：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
   private bindNodeKeys(el: HTMLDivElement, text: Text) {
+    // 唤醒为编辑态：恢复光标与选区显示（首个字符将替换全选内容）
+    const wake = () => el.classList.remove('silker-text-passive')
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab' || e.key === 'Enter') {
+      const passive = el.classList.contains('silker-text-passive')
+      if (passive && e.key.startsWith('Arrow')) {
+        // 激活态方向键：接管为节点导航（覆盖层随 activate 转移到新节点）
+        e.preventDefault()
+        this.navigate(e.key)
+        return
+      }
+      if (passive && e.key === 'Escape') {
+        e.preventDefault()
+        this.editor.enterPassive()
+        return
+      }
+      if (passive && e.key === 'Enter') {
+        // 激活态回车：新建兄弟节点（编辑态回车才是提交）
         e.preventDefault()
         void this.createRelated(e, text)
+        return
+      }
+      // 可打印字符或 IME 组合键：仅唤醒视觉（光标/选区显现），不吞键 ——
+      // 覆盖层始终可编辑，默认插入/组合直接落在其上，IME 首字符不丢
+      if (passive && (e.key.length === 1 || e.key === 'Process' || e.keyCode === 229)) {
+        wake()
+        return
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        // 覆盖层常驻：节点切换由 activate → editor.start 完成卸载重建，无需先失焦
+        void this.createRelated(e, text)
+      } else if (e.key === 'Enter' || e.key === 'Escape') {
+        // 阻止换行，提交 = 切回激活态视觉（覆盖层保持挂载可编辑，IME 不被打断）
+        e.preventDefault()
+        this.editor.enterPassive()
       }
     })
+    // 输入或点击覆盖层：从激活态唤醒为编辑态
+    el.addEventListener('input', wake)
+    el.addEventListener('compositionstart', wake)
+    el.addEventListener('mousedown', wake)
   }
 
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
@@ -203,9 +291,8 @@ export class MindMap {
     this.app.add(edge)
     this.editor.bind(node)
     await this.relayout()
-    // 新节点直接进入编辑状态，并同步激活态（失焦后高亮环跟随）
+    // 新节点进入激活态（常驻覆盖层，打字即编辑）
     this.activate(node)
-    this.editor.start(node)
   }
 
   // 复制参考节点的字体与盒子样式创建默认新节点（元函数：样式拷贝）
