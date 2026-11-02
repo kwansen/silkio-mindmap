@@ -6,6 +6,7 @@ import { layout } from "./layout";
 import { MindMapEdge } from "./Edge";
 import { ActiveHighlight } from "./ActiveHighlight";
 import { Marquee } from "./Marquee";
+import { DragGhost } from "./DragGhost";
 
 export interface Style {
   color: string
@@ -57,6 +58,9 @@ export type LayoutDirection = NonNullable<MindMapOptions['direction']>
 const ACTIVE_COLOR = '#3b82f6'
 const EDITING_COLOR = '#a855f7'
 
+// 落点判定间距上限（世界坐标）：合集左缘与左侧节点右缘间距在 0..DROP_RANGE 内视为候选（后期可能需要调整）
+const DROP_RANGE = 500
+
 
 
 export class MindMap {
@@ -80,14 +84,15 @@ export class MindMap {
   private marquee: Marquee
   // 左键按下状态：屏幕坐标用于位移阈值判断，世界坐标作为选框起点
   private marqueeDown: { sx: number; sy: number; wx: number; wy: number } | null = null
-  // 拖拽换父：拖动选中子树，落点目标节点显示紫色提示环
-  private dropHighlight: ActiveHighlight
-  // 拖拽上下文：起点（屏幕/世界）、拖动的子树根及其起始局部坐标
+  // 拖拽换父：原位虚影框 + 跟随鼠标合集矩形 + 落点连线（可放置提示）
+  private ghost: DragGhost
+  // 拖拽上下文：起点（屏幕/世界）、拖动的子树根、起始局部坐标与合集原始包围盒
   private dragState: {
     startScreen: { x: number; y: number }
     startWorld: { x: number; y: number }
     nodes: Text[]
     origins: { x: number; y: number }[]
+    unionBox: { x: number; y: number; w: number; h: number }
   } | null = null
   private dragMoved = false
 
@@ -112,9 +117,8 @@ export class MindMap {
     this.highlight = new ActiveHighlight(() => this.app.renderer.viewport.scale)
     // 框选矩形（init 中最后 add，绘制在一切之上）
     this.marquee = new Marquee(() => this.app.renderer.viewport.scale)
-    // 拖拽落点提示环（紫色，绘制在高亮环之上）
-    this.dropHighlight = new ActiveHighlight(() => this.app.renderer.viewport.scale)
-    this.dropHighlight.color = EDITING_COLOR
+    // 拖拽反馈层（绘制在高亮环之上）
+    this.ghost = new DragGhost(() => this.app.renderer.viewport.scale)
     // 左键框选与节点拖拽
     this.bindMarquee()
     // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
@@ -184,6 +188,8 @@ export class MindMap {
             startWorld: w,
             nodes,
             origins: nodes.map(n => ({ x: n.x, y: n.y })),
+            // 首帧拖拽时定格（各子树根包围盒的并集）
+            unionBox: { x: 0, y: 0, w: 0, h: 0 },
           }
           this.dragMoved = false
           return
@@ -196,20 +202,39 @@ export class MindMap {
       if (drag) {
         // 位移超过阈值才算拖拽，普通点击不触发
         if (!this.dragMoved && Math.hypot(e.clientX - drag.startScreen.x, e.clientY - drag.startScreen.y) <= 3) return
-        this.dragMoved = true
-        // 首帧退出单选覆盖层（选中集合与高亮环保留，视觉上"拎起"子树）
-        if (this.active) {
-          this.active = null
-          this.editor.deactivate()
+        // 首帧进入拖拽：退出单选覆盖层、节点本体降透明度形成原位虚影、定格各包围盒
+        if (!this.dragMoved) {
+          this.dragMoved = true
+          if (this.active) {
+            this.active = null
+            this.editor.deactivate()
+          }
+          drag.nodes.forEach(n => (n.opacity = 0.35))
+          const boxes = drag.nodes.map(n => {
+            const p = n.getWorldPoint()
+            return { x: p.x, y: p.y, w: n.width, h: n.height }
+          })
+          this.ghost.ghostBoxes = boxes
+          // 合集矩形：宽度取各子树根包围盒并集，高度固定为一行（首个节点的行高），不累加总高度
+          const minX = Math.min(...boxes.map(b => b.x))
+          const minY = Math.min(...boxes.map(b => b.y))
+          drag.unionBox = {
+            x: minX,
+            y: minY,
+            w: Math.max(...boxes.map(b => b.x + b.w)) - minX,
+            h: boxes[0].h,
+          }
         }
-        // 拖动子树根：子孙随嵌套变换一起移动（父链无缩放，局部位移 == 世界位移）
+        // 节点本体不再跟随移动，由反馈层代替：合集矩形 = 原包围盒 + 拖拽位移
         const cur = this.toWorld(e)
         const dx = cur.x - drag.startWorld.x
         const dy = cur.y - drag.startWorld.y
-        drag.nodes.forEach((n, i) => {
-          n.x = drag.origins[i].x + dx
-          n.y = drag.origins[i].y + dy
-        })
+        this.ghost.floatBox = {
+          x: drag.unionBox.x + dx,
+          y: drag.unionBox.y + dy,
+          w: drag.unionBox.w,
+          h: drag.unionBox.h,
+        }
         // 候选落点实时提示（紫色环）：命中时跳过被拖子树，取其下方的真实目标
         const subtree = new Set<Node>()
         const collect = (n: Node) => {
@@ -217,8 +242,8 @@ export class MindMap {
           n.children.forEach(collect)
         }
         drag.nodes.forEach(collect)
-        const t = this.hitText(cur, subtree)
-        this.dropHighlight.targets = t ? [t] : []
+        const t = this.dropTarget(drag, subtree)
+        this.ghost.target = t
         this.app.render()
         return
       }
@@ -245,7 +270,7 @@ export class MindMap {
         // 未超阈值的普通点击：交给 click 激活流程
         if (!this.dragMoved) return
         this.dragMoved = false
-        void this.commitDrop(drag.nodes, this.dropHighlight.targets[0] ?? null)
+        void this.commitDrop(drag.nodes, this.ghost.target)
         return
       }
       const down = this.marqueeDown
@@ -279,10 +304,52 @@ export class MindMap {
     return null
   }
 
-  // 落点提交：有效目标时把拖动子树整体挂到目标节点下（换父并换线），随后重布局落定；
-  // 无有效目标则仅重布局（layout 重算坐标，回到原位，相当于取消）
+  // 落点候选判定：不做鼠标悬浮命中，按几何间距——
+  // 从左向右布局（direction 'right'）取合集左缘到左侧节点右缘的间距，
+  // 从右向左布局（direction 'left'）镜像取合集右缘到右侧节点左缘的间距；
+  // 间距在 0..DROP_RANGE 内为候选，多个候选取水平间距最小者（同层节点边缘对齐时间距相同，
+  // 退而取与合集中心垂直距离最近者）。被拖子树内的节点不作候选。
+  private dropTarget(drag: NonNullable<MindMap['dragState']>, subtree: Set<Node>): Text | null {
+    const f = this.ghost.floatBox
+    if (!f) return null
+    const ltr = this.direction === 'right'
+    const centerY = f.y + f.h / 2
+    let best: Text | null = null
+    let bestGap = Infinity
+    let bestDy = Infinity
+    const walk = (n: Node) => {
+      if (n instanceof Text && !subtree.has(n)) {
+        const p = n.getWorldPoint()
+        // 垂直方向局限在同一水平带：候选节点与合集的 y 区间必须有交集
+        const vOverlap = Math.min(f.y + f.h, p.y + n.height) - Math.max(f.y, p.y)
+        if (vOverlap <= 0) {
+          n.children.forEach(walk)
+          return
+        }
+        const gap = ltr ? f.x - (p.x + n.width) : p.x - (f.x + f.w)
+        if (gap >= 0 && gap <= DROP_RANGE) {
+          const dy = Math.abs(centerY - (p.y + n.height / 2))
+          if (gap < bestGap || (gap === bestGap && dy < bestDy)) {
+            best = n
+            bestGap = gap
+            bestDy = dy
+          }
+        }
+      }
+      n.children.forEach(walk)
+    }
+    this.app.children.forEach(walk)
+    return best
+  }
+
+  // 落点提交：有效目标时把拖动子树顶层节点挂到目标节点下（换父并换线），随后重布局落定；
+  // 无有效目标则仅恢复不透明度并重布局（回到原位，相当于取消）
   private async commitDrop(nodes: Text[], target: Text | null) {
-    this.dropHighlight.targets = []
+    // 恢复节点本体不透明度，清空拖拽反馈层
+    nodes.forEach(n => (n.opacity = 1))
+    this.ghost.ghostBoxes = []
+    this.ghost.floatBox = null
+    this.ghost.target = null
     const subtree = new Set<Node>()
     const collect = (n: Node) => {
       subtree.add(n)
@@ -474,9 +541,9 @@ export class MindMap {
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.collectEdges(root, this.edges)
     this.app.add(this.edges)
-    // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽落点提示环在其上，框选矩形绘制在最顶层
+    // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽反馈层在其上，框选矩形绘制在最顶层
     this.app.add(this.highlight)
-    this.app.add(this.dropHighlight)
+    this.app.add(this.ghost)
     this.app.add(this.marquee)
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.render()
