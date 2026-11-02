@@ -1,11 +1,11 @@
 // 入口：挂载 canvas 并渲染一张示例思维导图
 import { MindMap, type MindMapNode, type Style } from "@silker/mindmap";
 
-// 统一样式：所有节点共用，按需用展开覆盖差异字段
+// 三级及以后样式（叶子节点）：基础样式
 const style: Style = {
   color: "#1f2937",
   backgroundColor: "#ffffff",
-  fontSize: 16,
+  fontSize: 14,
   fontWeight: 400,
   fontFamily: "sans-serif",
   radius: 6,
@@ -15,13 +15,32 @@ const style: Style = {
   padding: [6, 12],
 };
 
+// 二级样式：分支节点
+const branchStyle: Style = {
+  ...style,
+  fontSize: 16,
+  fontWeight: 500,
+  backgroundColor: "#eff6ff",
+  padding: [6, 16],
+};
+
+// 一级样式：根节点
+const rootStyle: Style = {
+  ...style,
+  fontSize: 24,
+  fontWeight: 500,
+  color: "#ffffff",
+  backgroundColor: "#3b82f6",
+  padding: [8, 24],
+};
+
 const data: MindMapNode = {
   text: "中心主题",
-  style: { ...style, fontSize: 24, fontWeight: 400, padding: [6, 24] },
+  style: rootStyle,
   children: [
     {
       text: "前端",
-      style: { ...style, backgroundColor: "#eff6ff" },
+      style: branchStyle,
       children: [
         {
           text: "框架",
@@ -52,7 +71,7 @@ const data: MindMapNode = {
     },
     {
       text: "后端",
-      style: { ...style, backgroundColor: "#f0fdf4" },
+      style: branchStyle,
       children: [
         {
           text: "Node.js",
@@ -83,7 +102,7 @@ const data: MindMapNode = {
     },
     {
       text: "运维",
-      style: { ...style, backgroundColor: "#fefce8" },
+      style: branchStyle,
       children: [
         {
           text: "容器化",
@@ -105,7 +124,7 @@ const data: MindMapNode = {
     },
     {
       text: "测试",
-      style: { ...style, backgroundColor: "#fef2f2" },
+      style: branchStyle,
       children: [
         {
           text: "单元测试",
