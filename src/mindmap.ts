@@ -20,8 +20,23 @@ export interface Style {
 
 export interface MindMapNode {
   text: string
-  style: Style
+  // 节点样式：缺省时按级数回退到 levelStyles 配置（用户数据可覆盖级数配置）
+  style?: Style
   children: MindMapNode[]
+}
+
+// 未配置 levelStyles 且节点缺省 style 时的兜底样式
+const defaultStyle: Style = {
+  color: '#1f2937',
+  backgroundColor: '#ffffff',
+  fontSize: 16,
+  fontWeight: 400,
+  fontFamily: 'sans-serif',
+  radius: 6,
+  borderColor: '#94a3b8',
+  borderWidth: 0,
+  lineHeight: 1.4,
+  padding: [6, 12],
 }
 
 export interface MindMapOptions {
@@ -29,6 +44,9 @@ export interface MindMapOptions {
   data: MindMapNode
   // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），默认 'left'
   direction?: 'left' | 'right'
+  // 按级数的样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度时套用最后一项。
+  // 节点数据上的 style 优先于级数配置；新建节点（Tab/Enter）按其级数取样式
+  levelStyles?: Style[]
 }
 
 export type LayoutDirection = NonNullable<MindMapOptions['direction']>
@@ -42,6 +60,10 @@ export class MindMap {
   private editor: TextEditor
   private edges: MindMapEdge[] = []
   private direction: LayoutDirection
+  // 级数样式配置（index 0 为根节点），renderNode 与新建节点按级数取值
+  private levelStyles: Style[]
+  // 每个节点创建时实际使用的样式，供无级数配置时新建节点沿用参考节点样式
+  private nodeStyles = new WeakMap<Text, Style>()
   // 激活态：点击或方向键选中但未进入编辑的节点，画布绘制高亮环；
   // 覆盖层常驻于激活节点（passive 激活态：光标透明），打字后唤醒为编辑态（飞书模型）
   private active: Text | null = null
@@ -49,6 +71,7 @@ export class MindMap {
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? 'left'
+    this.levelStyles = options.levelStyles ?? []
     this.app = new App(options.canvas)
     // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口
     this.viewport = new Viewport()
@@ -277,7 +300,10 @@ export class MindMap {
     console.log('[MindMap] createRelated', e.key, 'from:', text.text)
     const isChild = e.key === 'Tab'
     const parent = isChild ? text : (text.parent as Text | null) ?? text
-    const node = this.createNode(text)
+    // 新节点按级数取样式：Tab 建子节点深度 +1，Enter 建兄弟节点深度不变
+    const style = this.newNodeStyle(text, this.depthOf(text) + (isChild ? 1 : 0))
+    const node = this.createNode(text, style)
+    this.nodeStyles.set(node, style)
     if (isChild) {
       parent.add(node)
     } else {
@@ -295,23 +321,26 @@ export class MindMap {
     this.activate(node)
   }
 
-  // 复制参考节点的字体与盒子样式创建默认新节点（元函数：样式拷贝）
-  private createNode(ref: Text): Text {
-    return new Text({
-      x: 0,
-      y: 0,
-      wrap: true,
-      // 新节点与初始节点保持一致的最大宽度约束，否则长文本会无限撑开
-      widthRange: ref.widthRange ?? [0, 200],
-      text: '新节点',
-      fontSize: ref.fontSize,
-      fontWeight: ref.fontWeight,
-      fill: ref.fill,
-      fontFamily: ref.fontFamily,
-      padding: ref.padding,
-      lineHeight: ref.lineHeight,
-      boxStyle: ref.boxStyle,
-    })
+  // 节点在树中的级数（根节点为 0），由 parent 链向上回溯
+  private depthOf(node: Text): number {
+    let depth = 0
+    let p = node.parent as Text | null
+    while (p) {
+      depth++
+      p = p.parent as Text | null
+    }
+    return depth
+  }
+
+  // 新节点样式解析：配置了级数样式按级数取值，否则沿用参考节点的实际样式（旧行为）
+  private newNodeStyle(ref: Text, depth: number): Style {
+    if (this.levelStyles.length) return this.levelStyle(depth)
+    return this.nodeStyles.get(ref) ?? defaultStyle
+  }
+
+  // 按解析出的样式创建默认新节点，宽度范围与参考节点保持一致（元函数：样式构造）
+  private createNode(ref: Text, style: Style): Text {
+    return this.createText('新节点', style, ref.widthRange ?? [0, 200])
   }
 
   // 递归收集所有父子连线（每条边绑定父子节点，元函数：被构造时调用）
@@ -341,28 +370,42 @@ export class MindMap {
   }
 
   // 第一次递归：把数据节点转成 Text 节点树（x/y 留空，由布局器统一确定）
-  renderNode(data: MindMapNode): Text {
-    const text = new Text({
+  // 样式解析优先级：节点数据 style > levelStyles[depth]（超出配置长度套用最后一项）> 兜底样式
+  renderNode(data: MindMapNode, depth = 0): Text {
+    const style = data.style ?? this.levelStyle(depth)
+    const text = this.createText(data.text, style)
+    this.nodeStyles.set(text, style)
+    // 递归调用自身，将每个子数据转成子节点并挂到当前节点下
+    data.children.forEach(child => text.add(this.renderNode(child, depth + 1)))
+    return text
+  }
+
+  // 按级数取样式配置，超出配置长度时套用最后一项，未配置时兜底
+  private levelStyle(depth: number): Style {
+    if (!this.levelStyles.length) return defaultStyle
+    return this.levelStyles[Math.min(depth, this.levelStyles.length - 1)]
+  }
+
+  // 由样式配置构造 Text 节点（renderNode 与新建节点共用，保证两处映射一致）
+  private createText(text: string, style: Style, widthRange?: [number, number]): Text {
+    return new Text({
       x: 0,
       y: 0,
       wrap: true,
-      widthRange: [0, 200],
-      text: data.text,
-      fontSize: data.style.fontSize,
-      fontWeight: data.style.fontWeight,
-      fill: data.style.color,
-      fontFamily: data.style.fontFamily,
-      padding: data.style.padding,
-      lineHeight: data.style.lineHeight,
+      widthRange: widthRange ?? [0, 200],
+      text,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fill: style.color,
+      fontFamily: style.fontFamily,
+      padding: style.padding,
+      lineHeight: style.lineHeight,
       boxStyle: {
-        fill: data.style.backgroundColor,
-        stroke: data.style.borderColor,
-        lineWidth: data.style.borderWidth,
-        radius: data.style.radius,
+        fill: style.backgroundColor,
+        stroke: style.borderColor,
+        lineWidth: style.borderWidth,
+        radius: style.radius,
       },
     })
-    // 递归调用自身，将每个子数据转成子节点并挂到当前节点下
-    data.children.forEach(child => text.add(this.renderNode(child)))
-    return text
   }
 }

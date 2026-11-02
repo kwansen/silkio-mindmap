@@ -1,145 +1,141 @@
 // 入口：挂载 canvas 并渲染一张示例思维导图
-import { MindMap, type MindMapNode, type Style } from "@silker/mindmap";
+import { MindMap, type Style } from "@silker/mindmap";
 
-// 三级及以后样式（叶子节点）：基础样式
-const style: Style = {
-  color: "#1f2937",
-  backgroundColor: "#ffffff",
-  fontSize: 14,
-  fontWeight: 400,
-  fontFamily: "sans-serif",
-  radius: 6,
-  borderColor: "#60a5fa",
-  borderWidth: 0,
-  lineHeight: 1.4,
-  padding: [6, 12],
-};
+// 级数样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度套用最后一项
+const levelStyles: Style[] = [
+  // 一级样式：根节点
+  {
+    color: "#ffffff",
+    backgroundColor: "#3b82f6",
+    fontSize: 24,
+    fontWeight: 500,
+    fontFamily: "sans-serif",
+    radius: 6,
+    borderColor: "#60a5fa",
+    borderWidth: 0,
+    lineHeight: 1.4,
+    padding: [8, 24],
+  },
+  // 二级样式：分支节点
+  {
+    color: "#1f2937",
+    backgroundColor: "#eff6ff",
+    fontSize: 16,
+    fontWeight: 500,
+    fontFamily: "sans-serif",
+    radius: 6,
+    borderColor: "#60a5fa",
+    borderWidth: 0,
+    lineHeight: 1.4,
+    padding: [6, 16],
+  },
+  // 三级及以后样式（叶子节点）
+  {
+    color: "#1f2937",
+    backgroundColor: "",
+    fontSize: 14,
+    fontWeight: 400,
+    fontFamily: "sans-serif",
+    radius: 6,
+    borderColor: "",
+    borderWidth: 0,
+    lineHeight: 1.4,
+    padding: [6, 12],
+  },
+];
 
-// 二级样式：分支节点
-const branchStyle: Style = {
-  ...style,
-  fontSize: 16,
-  fontWeight: 500,
-  backgroundColor: "#eff6ff",
-  padding: [6, 16],
-};
-
-// 一级样式：根节点
-const rootStyle: Style = {
-  ...style,
-  fontSize: 24,
-  fontWeight: 500,
-  color: "#ffffff",
-  backgroundColor: "#3b82f6",
-  padding: [8, 24],
-};
-
-const data: MindMapNode = {
+// 用户数据：节点上的 style 可覆盖级数配置，缺省时按级数取 levelStyles
+const data = {
   text: "中心主题",
-  style: rootStyle,
   children: [
     {
       text: "前端",
-      style: branchStyle,
       children: [
         {
           text: "框架",
-          style,
           children: [
-            { text: "React", style, children: [] },
-            { text: "Vue", style, children: [] },
-            { text: "Svelte", style, children: [] },
+            { text: "React", children: [] },
+            { text: "Vue", children: [] },
+            { text: "Svelte", children: [] },
           ],
         },
         {
           text: "构建工具",
-          style,
           children: [
-            { text: "Vite", style, children: [] },
-            { text: "Webpack", style, children: [] },
+            { text: "Vite", children: [] },
+            { text: "Webpack", children: [] },
           ],
         },
         {
           text: "样式方案",
-          style,
           children: [
-            { text: "Tailwind", style, children: [] },
-            { text: "CSS Modules", style, children: [] },
+            { text: "Tailwind", children: [] },
+            { text: "CSS Modules", children: [] },
           ],
         },
       ],
     },
     {
       text: "后端",
-      style: branchStyle,
       children: [
         {
           text: "Node.js",
-          style,
           children: [
-            { text: "Express", style, children: [] },
-            { text: "NestJS", style, children: [] },
+            { text: "Express", children: [] },
+            { text: "NestJS", children: [] },
           ],
         },
         {
           text: "数据库",
-          style,
           children: [
-            { text: "MySQL", style, children: [] },
-            { text: "PostgreSQL", style, children: [] },
-            { text: "Redis", style, children: [] },
+            { text: "MySQL", children: [] },
+            { text: "PostgreSQL", children: [] },
+            { text: "Redis", children: [] },
           ],
         },
         {
           text: "API 设计",
-          style,
           children: [
-            { text: "REST", style, children: [] },
-            { text: "GraphQL", style, children: [] },
+            { text: "REST", children: [] },
+            { text: "GraphQL", children: [] },
           ],
         },
       ],
     },
     {
       text: "运维",
-      style: branchStyle,
       children: [
         {
           text: "容器化",
-          style,
           children: [
-            { text: "Docker", style, children: [] },
-            { text: "K8s", style, children: [] },
+            { text: "Docker", children: [] },
+            { text: "K8s", children: [] },
           ],
         },
         {
           text: "CI/CD",
-          style,
           children: [
-            { text: "GitHub Actions", style, children: [] },
-            { text: "Jenkins", style, children: [] },
+            { text: "GitHub Actions", children: [] },
+            { text: "Jenkins", children: [] },
           ],
         },
       ],
     },
     {
       text: "测试",
-      style: branchStyle,
       children: [
         {
           text: "单元测试",
-          style,
           children: [
-            { text: "Vitest", style, children: [] },
-            { text: "Jest", style, children: [] },
+            { text: "Vitest", children: [] },
+            { text: "Jest", children: [] },
           ],
         },
         {
           text: "E2E 测试",
-          style,
           children: [
-            { text: "Playwright", style, children: [] },
-            { text: "Cypress", style, children: [] },
+            { text: "Playwright", children: [] },
+            { text: "Cypress", children: [] },
           ],
         },
       ],
@@ -148,5 +144,5 @@ const data: MindMapNode = {
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-const mindmap = new MindMap({ canvas, data, direction: "right" });
+const mindmap = new MindMap({ canvas, data, direction: "right", levelStyles });
 mindmap.app.render();
