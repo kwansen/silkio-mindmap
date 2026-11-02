@@ -6,12 +6,12 @@ const levelStyles: Style[] = [
   // 一级样式：根节点
   {
     color: "#ffffff",
-    backgroundColor: "#3b82f6",
+    backgroundColor: "#efbeffff",
     fontSize: 24,
     fontWeight: 500,
     fontFamily: "sans-serif",
     radius: 6,
-    borderColor: "#60a5fa",
+    borderColor: "",
     borderWidth: 0,
     lineHeight: 1.4,
     padding: [8, 24],
@@ -19,7 +19,7 @@ const levelStyles: Style[] = [
   // 二级样式：分支节点
   {
     color: "#1f2937",
-    backgroundColor: "#eff6ff",
+    backgroundColor: "#dbeaffff",
     fontSize: 16,
     fontWeight: 500,
     fontFamily: "sans-serif",

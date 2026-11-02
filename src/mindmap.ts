@@ -96,6 +96,8 @@ export class MindMap {
     this.highlight = new ActiveHighlight(() => this.app.renderer.viewport.scale)
     // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
     document.addEventListener('keydown', this.onGlobalKeydown)
+    // 点击画布空白处取消激活态（拖拽平移不触发）
+    this.app.onBlankClick = () => this.deactivate()
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
     void this.init(options.data)
   }
@@ -108,6 +110,14 @@ export class MindMap {
     this.app.render()
     this.editor.start(text, { passive: true })
     this.scrollNodeIntoView(text)
+  }
+
+  // 取消激活：清空高亮环与激活引用，移除常驻覆盖层（文字交还 canvas 渲染）
+  private deactivate() {
+    if (!this.active) return
+    this.active = null
+    this.highlight.target = null
+    this.editor.deactivate()
   }
 
   // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
