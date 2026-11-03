@@ -7,7 +7,11 @@ import type { TextEditorCapability } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
 import { History } from "./history";
 import type { Command } from "./history";
-import { MindMapEdge } from "./Edge";
+import { MindMapEdge, MindPathEdge } from "./Edge";
+import type { EdgeShape } from "@silker/plugin-edge";
+
+// 思维导图连线类型：贝塞尔单段（MindMapEdge）或直线引出接入（MindPathEdge，path / zBezier）
+type MindEdge = MindMapEdge | MindPathEdge
 import { ActiveHighlight } from "./ActiveHighlight";
 import { Marquee } from "./Marquee";
 import { DragGhost } from "./DragGhost";
@@ -62,6 +66,9 @@ export interface MindMapOptions {
   // 数据变化回调：结构变化（新增/删除/拖拽换父）或文本编辑结束且重布局落定后触发，
   // 供宿主持久化等后续操作；当前数据用 toJSON() 导出
   onChange?: (type: MindMapChangeType) => void;
+  // 连线样式：'bezier' 单段贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + Z 字折线接入，
+  // 'zBezier' 父级水平直线引出 + 贝塞尔曲线接入
+  edgeStyle?: EdgeShape;
 }
 
 // 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束
@@ -83,7 +90,7 @@ export class MindMap {
   private pan: ViewportCapability | null = null;
   // 文本编辑能力（TextEditor 插件 install 时注册）：按能力接口消费，不依赖具体插件实例
   private editor: TextEditorCapability;
-  private edges: MindMapEdge[] = [];
+  private edges: MindEdge[] = [];
   private direction: LayoutDirection;
   // 级数样式配置（index 0 为根节点），renderNode 与新建节点按级数取值
   private levelStyles: Style[];
@@ -132,6 +139,8 @@ export class MindMap {
   private dragFills = new Map<Text, string>();
   // 数据变化回调（构造时从 options 记录）
   private onChange?: (type: MindMapChangeType) => void;
+  // 连线样式（构造时从 options 记录）
+  private edgeStyle: EdgeShape;
   // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放
   private history = new History();
   // 编辑会话起点快照（仅节点引用与原文字符串，非整树快照）：onEditStart 记录，
@@ -144,6 +153,12 @@ export class MindMap {
   // Enter/Escape/Delete 走节点操作），打字/IME/粘贴/点击唤醒为 true（按键交给覆盖层默认行为）。
   // 失焦、提交（Enter/Escape）与覆盖层移除时复位
   private editing = false;
+
+  // 按连线样式创建父子连线（统一入口，三处创建点共用）
+  private createEdge(from: Text, to: Text): MindEdge {
+    if (this.edgeStyle === "bezier") return new MindMapEdge(from, to);
+    return new MindPathEdge(from, to, this.edgeStyle);
+  }
 
   // 触发数据变化回调（重布局落定后由各变更入口调用）
   private emitChange(type: MindMapChangeType) {
@@ -198,6 +213,7 @@ export class MindMap {
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? "left";
+    this.edgeStyle = options.edgeStyle ?? "bezier";
     this.levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
     this.app = new App(options.canvas);
@@ -641,8 +657,8 @@ export class MindMap {
         newIndex: number;
         oldStyle: Style;
         newStyle: Style;
-        oldEdge: MindMapEdge;
-        newEdge: MindMapEdge;
+        oldEdge: MindEdge;
+        newEdge: MindEdge;
       }[] = [];
       for (const n of nodes) {
         const old = n.parent as Text;
@@ -671,7 +687,7 @@ export class MindMap {
           oldStyle: this.nodeStyles.get(n)!,
           newStyle,
           oldEdge,
-          newEdge: new MindMapEdge(parent, n),
+          newEdge: this.createEdge(parent, n),
         });
       }
       // 移动命令：多选目标合并为一条，undo 一次全回退（逆序插回，防同父索引失效）
@@ -1043,7 +1059,7 @@ export class MindMap {
       : parent.children.indexOf(text) + 1;
     const node = this.createNode(text, style);
     this.nodeStyles.set(node, style);
-    const edge = new MindMapEdge(parent, node);
+    const edge = this.createEdge(parent, node);
     // 新增节点命令：redo/undo 对称地增删子节点与连线
     const cmd: Command = {
       type: "add",
@@ -1150,10 +1166,10 @@ export class MindMap {
   }
 
   // 递归收集所有父子连线（每条边绑定父子节点，元函数：被构造时调用）
-  private collectEdges(node: Text, edges: MindMapEdge[]) {
+  private collectEdges(node: Text, edges: MindEdge[]) {
     node.children.forEach((child) => {
       const c = child as Text;
-      edges.push(new MindMapEdge(node, c));
+      edges.push(this.createEdge(node, c));
       this.collectEdges(c, edges);
     });
   }

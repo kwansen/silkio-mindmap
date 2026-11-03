@@ -157,11 +157,15 @@ const data = {
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+// 连线样式参数：'bezier' 纯贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + 贝塞尔接入
+const edgeStyle: "bezier" | "path" | "zBezier" = "bezier";
+
 const mindmap = new MindMap({
   canvas,
   data,
   direction: "right",
   levelStyles,
+  edgeStyle,
   // 数据变化（新增/删除/移动/文本编辑）时打印当前数据 JSON
   onChange: (type) => {
     console.log(`[MindMap] ${type}`, JSON.stringify(mindmap.toJSON(), null, 2));
