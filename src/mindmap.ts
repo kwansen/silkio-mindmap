@@ -1,7 +1,9 @@
 import { App, Text } from "@silker/core";
 import type { Node } from "@silker/core";
-import { Viewport } from "@silker/plugin-viewport";
-import { TextEditor } from "@silker/plugin-text-editor";
+import { Viewport, VIEWPORT_CAPABILITY } from "@silker/core-viewport";
+import type { ViewportCapability } from "@silker/core-viewport";
+import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
+import type { TextEditorCapability } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
 import { MindMapEdge } from "./Edge";
 import { ActiveHighlight } from "./ActiveHighlight";
@@ -69,8 +71,10 @@ const DROP_RANGE = 500;
 export class MindMap {
   app: App;
   private root: Text | null = null;
-  private viewport: Viewport | null = null;
-  private editor: TextEditor;
+  // 视口能力（Viewport 插件 install 时注册）：按能力接口消费平移入口，不依赖具体插件实例
+  private pan: ViewportCapability | null = null;
+  // 文本编辑能力（TextEditor 插件 install 时注册）：按能力接口消费，不依赖具体插件实例
+  private editor: TextEditorCapability;
   private edges: MindMapEdge[] = [];
   private direction: LayoutDirection;
   // 级数样式配置（index 0 为根节点），renderNode 与新建节点按级数取值
@@ -84,9 +88,7 @@ export class MindMap {
   private selection = new Set<Text>();
   // 单选派生：多选或无选中时为 null（Tab/Enter、打字唤醒仅单选生效）
   private get active(): Text | null {
-    return this.selection.size === 1
-      ? ([...this.selection][0] as Text)
-      : null;
+    return this.selection.size === 1 ? ([...this.selection][0] as Text) : null;
   }
   private marquee: Marquee;
   // 左键按下状态：屏幕坐标用于位移阈值判断，世界坐标作为选框起点
@@ -123,19 +125,23 @@ export class MindMap {
     this.direction = options.direction ?? "left";
     this.levelStyles = options.levelStyles ?? [];
     this.app = new App(options.canvas);
-    // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口
-    this.viewport = new Viewport();
-    this.app.use(this.viewport);
-    // 安装文本编辑插件：输入时重新布局，编辑框就绪后直接监听按键新建节点（包装 add 自动绑定后续节点）
-    this.editor = new TextEditor({
-      onInput: () => this.relayout(),
-      onEditStart: (el, text) => this.bindNodeKeys(el, text),
-      // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
-      onActivate: (text) => this.activate(text),
-      // 失焦切回激活态视觉时同步高亮环颜色
-      onEditEnd: () => this.setHighlightEditing(false),
-    });
-    this.app.use(this.editor);
+    // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口；
+    // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
+    this.app.use(new Viewport());
+    this.pan = this.app.require(VIEWPORT_CAPABILITY);
+    // 安装文本编辑插件：输入时重新布局，编辑框就绪后直接监听按键新建节点（包装 add 自动绑定后续节点）；
+    // install 时自注册文本编辑能力，此后仅按能力键消费
+    this.app.use(
+      new TextEditor({
+        onInput: () => this.relayout(),
+        onEditStart: (el, text) => this.bindNodeKeys(el, text),
+        // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
+        onActivate: (text) => this.activate(text),
+        // 失焦切回激活态视觉时同步高亮环颜色
+        onEditEnd: () => this.setHighlightEditing(false),
+      }),
+    );
+    this.editor = this.app.require(TEXT_EDITOR_CAPABILITY);
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight(
       () => this.app.renderer.viewport.scale,
@@ -166,10 +172,7 @@ export class MindMap {
 
   // 点击进入编辑（按下未拖动的 mouseup）：填入节点文本、唤醒编辑态，并把光标定位到点击处
   private wakeEditing(e?: MouseEvent) {
-    this.editor.beginEdit(
-      true,
-      e ? { x: e.clientX, y: e.clientY } : undefined,
-    );
+    this.editor.beginEdit(true, e ? { x: e.clientX, y: e.clientY } : undefined);
     this.setHighlightEditing(true);
   }
 
@@ -201,7 +204,12 @@ export class MindMap {
       nodes,
       origins: nodes.map((n) => ({ x: n.x, y: n.y })),
       grabNode,
-      grabBox: { x: grabP.x, y: grabP.y, w: grabNode.width, h: grabNode.height },
+      grabBox: {
+        x: grabP.x,
+        y: grabP.y,
+        w: grabNode.width,
+        h: grabNode.height,
+      },
     };
     this.dragMoved = false;
   }
@@ -260,6 +268,11 @@ export class MindMap {
       // 未建立拖拽上下文但命中已选中节点（如根节点）：记录按下位置供 mouseup 判定点击进入编辑
       if (hit && this.selection.has(hit)) {
         this.overlayDown = { x: e.clientX, y: e.clientY };
+      }
+      // 一级节点（根的直接子级）不可拖拽：按下改为经视口能力平移画布，不进入框选
+      if (hit && hit !== this.root && hit.parent === this.root) {
+        this.pan?.beginPan(e);
+        return;
       }
       this.marqueeDown = { sx: e.clientX, sy: e.clientY, wx: w.x, wy: w.y };
     });
@@ -367,10 +380,7 @@ export class MindMap {
       // 按下未建立拖拽上下文的已选中节点（如根节点）：无位移视为点击进入编辑
       const down = this.overlayDown;
       this.overlayDown = null;
-      if (
-        down &&
-        Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3
-      ) {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3) {
         this.wakeEditing(e);
       }
       const marquee = this.marqueeDown;
@@ -640,8 +650,7 @@ export class MindMap {
     const toChild =
       this.direction === "right" ? key === "ArrowRight" : key === "ArrowLeft";
     if (toChild) {
-      if (current.children.length)
-        this.activate(current.children[0] as Text);
+      if (current.children.length) this.activate(current.children[0] as Text);
     } else if (parent) {
       this.activate(parent);
     }
@@ -722,7 +731,7 @@ export class MindMap {
       siblingGap: 20,
     });
     this.root = root;
-    this.viewport!.fit(this.getBounds(root));
+    this.pan!.fit(this.getBounds(root));
     this.app.add(root);
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.collectEdges(root, this.edges);
@@ -737,7 +746,7 @@ export class MindMap {
 
   // 文本输入后按新尺寸重新布局并渲染（元函数组装：重排 + 渲染）
   private async relayout() {
-    if (!this.root || !this.viewport) return;
+    if (!this.root || !this.pan) return;
     await layout(this.root, {
       direction: this.direction,
       levelGap: 80,

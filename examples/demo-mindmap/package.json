@@ -12,7 +12,7 @@
     "@silker/core": "workspace:*",
     "@silker/mindmap": "workspace:*",
     "@silker/plugin-edge": "workspace:*",
-    "@silker/plugin-viewport": "workspace:*",
+    "@silker/core-viewport": "workspace:*",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }
