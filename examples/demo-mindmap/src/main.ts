@@ -5,8 +5,8 @@ import { MindMap, type Style } from "@silker/mindmap";
 const levelStyles: Style[] = [
   // 一级样式：根节点
   {
-    color: "#ffffff",
-    backgroundColor: "#efbeffff",
+    color: "#ffffffff",
+    backgroundColor: "#3b4162ff",
     fontSize: 24,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -29,15 +29,28 @@ const levelStyles: Style[] = [
     lineHeight: 1.4,
     padding: [6, 16],
   },
-  // 三级及以后样式（叶子节点）
+  // 三级样式
   {
     color: "#1f2937",
-    backgroundColor: "",
+    backgroundColor: "#ffe7e7ff",
     fontSize: 14,
     fontWeight: 400,
     fontFamily: "sans-serif",
     radius: 6,
-    borderColor: "red",
+    borderColor: "",
+    borderWidth: 0,
+    lineHeight: 1.4,
+    padding: [6, 12],
+  },
+  // 四级及以后样式（叶子节点）
+  {
+    color: "#1f2937",
+    backgroundColor: "#fff6ddff",
+    fontSize: 14,
+    fontWeight: 400,
+    fontFamily: "sans-serif",
+    radius: 6,
+    borderColor: "",
     borderWidth: 0,
     lineHeight: 1.4,
     padding: [6, 12],

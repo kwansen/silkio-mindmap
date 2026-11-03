@@ -176,10 +176,11 @@ export class MindMap {
 
   // 命中可拖节点时建立拖拽上下文（画布按下与覆盖层按下共用），未命中或不可拖返回 false：
   // 命中已选中节点 → 拖整组选中子树；命中未选中节点 → 无需先激活，单独拖它；
-  // 根节点与一级节点（根的直接子级）不可拖，返回 false 交回平移/点击编辑/框选流程
+  // 根节点不可拖（无父可换），返回 false 交回平移/点击编辑/框选流程
   private tryStartDrag(e: MouseEvent, hit: Text | null): boolean {
     if (!hit) return false;
-    if (hit === this.root || hit.parent === this.root) return false;
+    // 根节点不可拖动（无父可换），按下走视口平移
+    if (hit === this.root) return false;
     if (!this.selection.has(hit)) {
       // 未选中的节点：拖动即单独拖它；未超阈值松手仍走 click 激活流程（不进编辑）
       this.startDrag(e, [hit], hit);
@@ -267,8 +268,8 @@ export class MindMap {
       if (hit && this.selection.has(hit)) {
         this.overlayDown = { x: e.clientX, y: e.clientY };
       }
-      // 一级节点（根的直接子级）不可拖拽：按下改为经视口能力平移画布，不进入框选
-      if (hit && hit !== this.root && hit.parent === this.root) {
+      // 根节点不可拖拽：按下改为经视口能力平移画布，不进入框选
+      if (hit === this.root) {
         this.pan?.beginPan(e);
         return;
       }
