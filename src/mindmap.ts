@@ -104,6 +104,9 @@ export class MindMap {
   private highlight: ActiveHighlight;
   // 折叠开关覆盖层：为有子节点的可见节点绘制 −/+ 圆形开关
   private collapseToggle: CollapseToggle;
+  // 悬浮展开态开关所属节点集合（− 按需显示的数据源）：鼠标压在「节点 + 到各可见子节点
+  // 连线」构成的覆盖矩形（或其开关圆）内；父子区域嵌套时可同时命中多个
+  private hoverToggles = new Set<Text>();
   // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（隐藏态：空覆盖层、
   // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
   // size>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
@@ -422,15 +425,18 @@ export class MindMap {
     });
   }
 
-  // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外
+  // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外。
+  // 折叠态（+）常显；展开态（−）仅鼠标悬浮该节点时显示（拖拽/框选中一律隐藏）
   private collapseItems(): { node: Text; x: number; y: number; collapsed: boolean }[] {
     if (!this.root) return [];
     const ltr = this.direction === "right";
+    // 拖拽或框选进行中隐藏全部展开态开关，避免与交互反馈叠加
+    const busy = this.dragState !== null || this.marqueeDown !== null;
     const out: { node: Text; x: number; y: number; collapsed: boolean }[] = [];
     const walk = (n: Text) => {
       // 隐藏子树整体跳过（折叠时子孙不可见，也不显示其开关）
       if (!n.visible) return;
-      if (n.children.length) {
+      if (n.children.length && (n.collapsed || (!busy && this.hoverToggles.has(n)))) {
         const p = n.getWorldPoint();
         out.push({
           node: n,
@@ -456,12 +462,68 @@ export class MindMap {
     return null;
   }
 
-  // 切换折叠：翻转标志后重布局（内部统一联动可见性）；选中态指向被隐藏节点时清空
+  // 切换折叠：翻转标志后重布局（内部统一联动可见性）；选中态指向被隐藏节点时清空。
+  // 展开时鼠标正压在开关上，加入悬浮集合让 − 持续可见（否则松手即隐藏）
   private async toggleCollapse(node: Text) {
     node.collapsed = !node.collapsed;
+    if (node.collapsed) this.hoverToggles.delete(node);
+    else this.hoverToggles.add(node);
     if ([...this.selection].some((s) => !s.visible)) this.deactivate();
     await this.relayout();
     this.emitChange("collapse");
+  }
+
+  // 节点到各可见子节点连线构成的覆盖矩形（不含节点自身盒体）：连线（三种 shape 皆然）
+  // 始终落在 [节点近端边缘, 子锚点] × [父锚 y, 子锚 y] 的范围内。悬浮节点本体不触发显示，
+  // 仅连线区域触发；无可见子节点返回 null（无连线即无区域）
+  private toggleHoverRect(n: Text) {
+    const ltr = this.direction === "right";
+    const p = n.getWorldPoint();
+    // 起点为节点近端边缘（悬浮节点本体不算），纵向含父锚 y（连线由此引出）
+    let x0 = ltr ? p.x + n.width : p.x;
+    let x1 = x0;
+    let y0 = p.y + n.height / 2;
+    let y1 = y0;
+    let has = false;
+    n.children.forEach((c) => {
+      const t = c as Text;
+      if (!t.visible) return;
+      const cp = t.getWorldPoint();
+      const ax = ltr ? cp.x : cp.x + t.width;
+      const ay = cp.y + t.height / 2;
+      x0 = Math.min(x0, ax);
+      x1 = Math.max(x1, ax);
+      y0 = Math.min(y0, ay);
+      y1 = Math.max(y1, ay);
+      has = true;
+    });
+    return has ? { x0, y0, x1, y1 } : null;
+  }
+
+  // 悬浮命中集合：鼠标压在展开态节点的连线覆盖矩形（不含节点本体，或其开关圆）内即命中，
+  // 折叠态不依赖悬浮（+ 常显）；父子区域嵌套时同一点可命中多个节点
+  private hoverToggleTargets(w: { x: number; y: number }): Set<Text> {
+    const out = new Set<Text>();
+    if (!this.root) return out;
+    const ltr = this.direction === "right";
+    const walk = (n: Text) => {
+      if (!n.visible) return;
+      if (n.children.length && !n.collapsed) {
+        const r = this.toggleHoverRect(n);
+        if (r && w.x >= r.x0 && w.x <= r.x1 && w.y >= r.y0 && w.y <= r.y1) {
+          out.add(n);
+        } else {
+          // 矩形外但压在开关圆上（从节点移向开关的过渡区），保持显示
+          const p = n.getWorldPoint();
+          const cx = ltr ? p.x + n.width + TOGGLE_GAP : p.x - TOGGLE_GAP;
+          const cy = p.y + n.height / 2;
+          if (Math.hypot(w.x - cx, w.y - cy) <= TOGGLE_RADIUS + 4) out.add(n);
+        }
+      }
+      n.children.forEach((c) => walk(c as Text));
+    };
+    walk(this.root);
+    return out;
   }
 
   // 批量设置选中（单选/多选统一入口）：
@@ -522,6 +584,24 @@ export class MindMap {
         return;
       }
       this.marqueeDown = { sx: e.clientX, sy: e.clientY, wx: w.x, wy: w.y };
+    });
+    // 悬浮驱动展开态开关显隐：压在连线覆盖矩形（或其开关圆）内显示 −，离开即隐藏；
+    // 集合变化才重绘。激活节点被覆盖层遮住时 canvas 收不到 move，悬浮态保持不闪断
+    canvas.addEventListener("mousemove", (e) => {
+      const next = this.hoverToggleTargets(this.toWorld(e));
+      const cur = this.hoverToggles;
+      const same =
+        next.size === cur.size && [...next].every((n) => cur.has(n));
+      if (!same) {
+        this.hoverToggles = next;
+        this.app.render();
+      }
+    });
+    canvas.addEventListener("mouseleave", () => {
+      if (this.hoverToggles.size) {
+        this.hoverToggles.clear();
+        this.app.render();
+      }
     });
     window.addEventListener("mousemove", (e) => {
       const drag = this.dragState;
