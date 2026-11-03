@@ -633,6 +633,9 @@ export class MindMap {
   // 从右向左布局（direction 'left'）镜像取合集右缘到右侧节点左缘的间距；
   // 间距在 0..DROP_RANGE 内为候选，多个候选取水平间距最小者（同层节点边缘对齐时间距相同，
   // 退而取与合集中心垂直距离最近者）。被拖子树内的节点不作候选。
+  // 垂直命中带是节点的「子树纵向跨度」（自身 + 全部后代的 y 区间并集）而非节点自身：
+  // 悬浮在目标纵向范围之外（如一级节点下方的空白区）也能命中它；贴着某个后代悬浮时
+  // 后代水平间距更小仍优先，故深处节点不会被祖先抢走
   private dropTarget(
     drag: NonNullable<MindMap["dragState"]>,
     subtree: Set<Node>,
@@ -644,27 +647,32 @@ export class MindMap {
     let best: Text | null = null;
     let bestGap = Infinity;
     let bestDy = Infinity;
-    const walk = (n: Node) => {
+    // 后序遍历：返回以 n 为根的子树纵向跨度 [minY, maxY]
+    const walk = (n: Node): [number, number] => {
+      const p = n.getWorldPoint();
+      let minY = p.y;
+      let maxY = p.y + n.height;
+      n.children.forEach((c) => {
+        const [cy0, cy1] = walk(c);
+        if (cy0 < minY) minY = cy0;
+        if (cy1 > maxY) maxY = cy1;
+      });
       if (n instanceof Text && !subtree.has(n)) {
-        const p = n.getWorldPoint();
-        // 垂直方向局限在同一水平带：候选节点与合集的 y 区间必须有交集
         const vOverlap =
-          Math.min(f.y + f.h, p.y + n.height) - Math.max(f.y, p.y);
-        if (vOverlap <= 0) {
-          n.children.forEach(walk);
-          return;
-        }
-        const gap = ltr ? f.x - (p.x + n.width) : p.x - (f.x + f.w);
-        if (gap >= 0 && gap <= DROP_RANGE) {
-          const dy = Math.abs(centerY - (p.y + n.height / 2));
-          if (gap < bestGap || (gap === bestGap && dy < bestDy)) {
-            best = n;
-            bestGap = gap;
-            bestDy = dy;
+          Math.min(f.y + f.h, maxY) - Math.max(f.y, minY);
+        if (vOverlap > 0) {
+          const gap = ltr ? f.x - (p.x + n.width) : p.x - (f.x + f.w);
+          if (gap >= 0 && gap <= DROP_RANGE) {
+            const dy = Math.abs(centerY - (p.y + n.height / 2));
+            if (gap < bestGap || (gap === bestGap && dy < bestDy)) {
+              best = n;
+              bestGap = gap;
+              bestDy = dy;
+            }
           }
         }
       }
-      n.children.forEach(walk);
+      return [minY, maxY];
     };
     this.app.children.forEach(walk);
     return best;
