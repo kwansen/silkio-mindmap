@@ -506,6 +506,10 @@ export class MindMap {
   // 落点提交：有效目标时把拖动子树顶层节点挂到目标节点下（换父并换线），随后重布局落定；
   // 无有效目标则仅恢复不透明度并重布局（回到原位，相当于取消）
   private async commitDrop(nodes: Text[], target: Text | null) {
+    // 拖拽合集垂直中点：决定在目标子节点列表中的插入位置（清空反馈层前先定格）
+    const dropY = this.ghost.floatBox
+      ? this.ghost.floatBox.y + this.ghost.floatBox.h / 2
+      : Infinity;
     // 恢复文字颜色与高亮环样式，清空拖拽反馈层
     this.dragFills.forEach((fill, n) => (n.fill = fill));
     this.dragFills.clear();
@@ -525,6 +529,8 @@ export class MindMap {
     nodes.forEach(collect);
     const parent = target && !subtree.has(target) ? target : null;
     if (parent) {
+      // 同一目标父级插入多个节点时依次后移；基座索引按原子节点位置只算一次
+      const insertIndex = new Map<Text, number>();
       for (const n of nodes) {
         const old = n.parent as Text;
         // 目标就是当前父级：无变化
@@ -532,7 +538,11 @@ export class MindMap {
         // 原父级也在被拖子树内（多选时父子同选）：保持原父子结构，跟随父级一起挂载
         if (subtree.has(old)) continue;
         old.remove(n);
-        parent.add(n);
+        // 基于落点垂直位置插入到目标子节点列表的对应位置，而非一律追加到最后
+        const index = insertIndex.get(parent) ?? this.dropIndex(parent, dropY);
+        parent.children.splice(index, 0, n);
+        n.parent = parent;
+        insertIndex.set(parent, index + 1);
         // 换父后级数变化：按新级数默认样式与用户自定义样式合并重新应用（未配置级数样式时保持原样）
         if (this.levelStyles.length) {
           this.applyNodeStyle(n, {
@@ -557,6 +567,17 @@ export class MindMap {
     await this.relayout();
     // 拖拽后保持选中：单选回到激活态（覆盖层），多选保持批量选中
     this.setSelection(nodes);
+  }
+
+  // 落点插入位置：按拖拽合集垂直中点与目标现有子节点的垂直中点比较，
+  // 返回应插入的序号（子节点垂直堆叠，中点在其上方的都排在前面；无落点信息时兜底追加到末尾）
+  private dropIndex(parent: Text, dropY: number): number {
+    let index = 0;
+    for (const child of parent.children) {
+      const c = child as Text;
+      if (c.getWorldPoint().y + c.height / 2 < dropY) index++;
+    }
+    return index;
   }
 
   // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）
