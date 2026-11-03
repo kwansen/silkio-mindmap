@@ -143,13 +143,11 @@ export class MindMap {
     );
     this.editor = this.app.require(TEXT_EDITOR_CAPABILITY);
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
-    this.highlight = new ActiveHighlight(
-      () => this.app.renderer.viewport.scale,
-    );
+    this.highlight = new ActiveHighlight();
     // 框选矩形（init 中最后 add，绘制在一切之上）
     this.marquee = new Marquee(() => this.app.renderer.viewport.scale);
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换
-    this.ghost = new DragGhost(() => this.app.renderer.viewport.scale);
+    this.ghost = new DragGhost();
     this.ghost.mirror = this.direction === "left";
     // 左键框选与节点拖拽
     this.bindMarquee();

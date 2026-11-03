@@ -9,20 +9,13 @@ export class ActiveHighlight extends Node {
   color = "#3b82f6";
   // 虚线模式：拖拽中原位节点的高亮环用虚线（区别于正常激活态实线）
   dashed = false;
-  // 线宽与圆角按视口缩放折算，保证屏幕视觉粗细恒定
-  getScale: () => number;
-
-  constructor(getScale: () => number) {
-    super();
-    this.getScale = getScale;
-  }
 
   render(ctx: CanvasRenderingContext2D) {
-    const scale = this.getScale();
     ctx.save();
     ctx.strokeStyle = this.color;
-    ctx.lineWidth = 2 / scale;
-    if (this.dashed) ctx.setLineDash([5 / scale, 4 / scale]);
+    // 线宽与虚线为世界坐标单位，随视口缩放与节点、连线保持一致
+    ctx.lineWidth = 2;
+    if (this.dashed) ctx.setLineDash([5, 4]);
     for (const t of this.targets) {
       const p = t.getWorldPoint();
       ctx.beginPath();
