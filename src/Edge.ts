@@ -42,7 +42,7 @@ export class MindPathEdge extends BaseEdge {
   toNode: Text
 
   // 根据父子节点创建连线，颜色暂用默认石板灰；shape 透传给底层渲染器
-  constructor(from: Text, to: Text, shape: "path" | "zBezier" = "path") {
+  constructor(from: Text, to: Text, shape: "path" | "zBezier" | "rPath" = "path") {
     super({ color: "#94a3b8", shape })
     this.fromNode = from
     this.toNode = to

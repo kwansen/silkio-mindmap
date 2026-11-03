@@ -157,8 +157,8 @@ const data = {
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-// 连线样式参数：'bezier' 纯贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + 贝塞尔接入
-const edgeStyle: "bezier" | "path" | "zBezier" = "bezier";
+// 连线样式参数：'bezier' 纯贝塞尔 S 曲线（默认），'path' Z 字折线，'rPath' 圆角 Z 字折线
+const edgeStyle: "bezier" | "path" | "zBezier" | "rPath" = "rPath";
 
 const mindmap = new MindMap({
   canvas,
