@@ -296,14 +296,21 @@ export class MindMap {
           }
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
           this.dragFills.clear();
-          // 高亮环跟随被拖节点（拖未选中节点时旧激活环需移除）
-          this.highlight.targets = drag.nodes;
+          // 高亮环跟随被拖子树：拖拽父节点时其子孙节点同样加虚线环（拖未选中节点时旧激活环需移除）
+          const targets = new Set<Text>();
+          const collectTargets = (n: Node) => {
+            if (targets.has(n as Text)) return;
+            targets.add(n as Text);
+            n.children.forEach(collectTargets);
+          };
+          drag.nodes.forEach(collectTargets);
+          this.highlight.targets = [...targets];
           drag.nodes.forEach((n) => {
             this.dragFills.set(n, n.fill);
             n.fill = "#4b5563";
           });
           this.highlight.dashed = true;
-          this.highlight.color = "#c1cfffff";
+          this.highlight.color = "blue";
           // 合集虚影克隆鼠标按下的节点（框选多个时拖的是按住的那个，而非集合第一个）
           this.dragChip = this.cloneTextStyle(drag.grabNode);
           this.dragChip.opacity = 0.5;

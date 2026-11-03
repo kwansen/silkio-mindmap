@@ -6,7 +6,7 @@ const levelStyles: Style[] = [
   // 一级样式：根节点
   {
     color: "#ffffffff",
-    backgroundColor: "#3b4162ff",
+    backgroundColor: "#435465",
     fontSize: 24,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -19,7 +19,7 @@ const levelStyles: Style[] = [
   // 二级样式：分支节点
   {
     color: "#1f2937",
-    backgroundColor: "#dbeaffff",
+    backgroundColor: "#C0CAD5",
     fontSize: 16,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -32,7 +32,7 @@ const levelStyles: Style[] = [
   // 三级样式
   {
     color: "#1f2937",
-    backgroundColor: "#ffe7e7ff",
+    backgroundColor: "#f2f2f2ff",
     fontSize: 14,
     fontWeight: 400,
     fontFamily: "sans-serif",
@@ -45,7 +45,7 @@ const levelStyles: Style[] = [
   // 四级及以后样式（叶子节点）
   {
     color: "#1f2937",
-    backgroundColor: "#fff6ddff",
+    backgroundColor: "",
     fontSize: 14,
     fontWeight: 400,
     fontFamily: "sans-serif",
