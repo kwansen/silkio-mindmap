@@ -92,7 +92,7 @@ export class MindMap {
   // 节点数据上的用户自定义样式（未自定义的节点不记录），换父重设样式时与新级数默认样式合并
   private customStyles = new WeakMap<Text, Style>();
   private highlight: ActiveHighlight;
-  // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（passive：空覆盖层、
+  // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（隐藏态：空覆盖层、
   // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
   // size>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
   private selection = new Set<Text>();
@@ -140,6 +140,10 @@ export class MindMap {
     node: null,
     text: "",
   };
+  // 编辑态（唯一状态来源，覆盖层常驻、显隐由本状态驱动）：激活态为 false（方向键导航、
+  // Enter/Escape/Delete 走节点操作），打字/IME/粘贴/点击唤醒为 true（按键交给覆盖层默认行为）。
+  // 失焦、提交（Enter/Escape）与覆盖层移除时复位
+  private editing = false;
 
   // 触发数据变化回调（重布局落定后由各变更入口调用）
   private emitChange(type: MindMapChangeType) {
@@ -147,15 +151,15 @@ export class MindMap {
   }
 
   // 撤销：真正输入中（编辑态）或拖拽中不响应（避免与进行中的变更互踩）；激活态覆盖层
-  // （passive 视觉，文字仍由 canvas 渲染）不算编辑，撤销照常执行；回退前先清空选中态，
+  // （隐藏态视觉，文字仍由 canvas 渲染）不算编辑，撤销照常执行；回退前先清空选中态，
   // 防止悬空引用（选中/覆盖层指向已摘除的节点）
   async undo() {
-    if (this.editor.isTyping || this.dragState) return;
+    if (this.editing || this.dragState) return;
     const cmd = this.history.undo();
     if (!cmd) return;
     this.selection.clear();
     this.highlight.targets = [];
-    this.editor.deactivate();
+    this.editor.stop();
     await this.relayout();
     // 直接调用字段而非 emitChange：undo/redo 不产生新变更，仅通知宿主数据已回退
     this.onChange?.(cmd.type);
@@ -163,12 +167,12 @@ export class MindMap {
 
   // 重做：流程与 undo 对称，方向相反
   async redo() {
-    if (this.editor.isTyping || this.dragState) return;
+    if (this.editing || this.dragState) return;
     const cmd = this.history.redo();
     if (!cmd) return;
     this.selection.clear();
     this.highlight.targets = [];
-    this.editor.deactivate();
+    this.editor.stop();
     await this.relayout();
     this.onChange?.(cmd.type);
   }
@@ -207,6 +211,8 @@ export class MindMap {
       new TextEditor({
         onInput: () => this.relayout(),
         onEditStart: (el, text) => {
+          // 覆盖层挂载即回到激活态（编辑态由后续打字/点击重新唤醒）
+          this.editing = false;
           // 编辑会话起点：定格节点与原文，编辑结束对比决定是否记入历史
           // （覆盖层编辑是持续同步输入，无法在单次 input 边界判定"一次变更"）
           this.editingOld = { node: text, text: text.text };
@@ -214,8 +220,9 @@ export class MindMap {
         },
         // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
         onActivate: (text) => this.activate(text),
-        // 失焦切回激活态视觉时同步高亮环颜色；编辑结束视为一次文本变更
+        // 失焦切回隐藏态时同步高亮环颜色并复位编辑态；编辑结束视为一次文本变更
         onEditEnd: () => {
+          this.editing = false;
           this.setHighlightEditing(false);
           // 文本相对会话起点确有变化才记历史：newText 取编辑结束时的节点文本
           // （此时覆盖层内容已同步进节点）；record 仅入栈不执行，因变更已发生
@@ -258,16 +265,16 @@ export class MindMap {
 
   // 单选激活（覆盖层 + 高亮环 + 视口跟随），语义化入口
   private activate(text: Text) {
-    // 覆盖层激活态沉底后点击会穿透到画布：唤醒编辑（mouseup）后的同节点 click 不再重复激活，
+    // 覆盖层隐藏态沉底后点击会穿透到画布：唤醒编辑（mouseup）后的同节点 click 不再重复激活，
     // 避免重建覆盖层打断刚进入的编辑
-    if (text === this.active && this.editor.isEditing && this.editor.hasFocus())
-      return;
+    if (text === this.active && this.editor.hasFocus()) return;
     this.setSelection([text]);
   }
 
-  // 点击进入编辑（按下未拖动的 mouseup）：填入节点文本、唤醒编辑态，并把光标定位到点击处
-  private wakeEditing(e?: MouseEvent) {
-    this.editor.beginEdit(true, e ? { x: e.clientX, y: e.clientY } : undefined);
+  // 唤醒编辑态：显示覆盖层接管文字渲染（fill 填入节点文本、point 定位光标），高亮环切编辑色
+  private wake(fill = false, point?: { x: number; y: number }) {
+    this.editor.show({ fill, point });
+    this.editing = true;
     this.setHighlightEditing(true);
   }
 
@@ -315,7 +322,7 @@ export class MindMap {
     if (!this.selection.size) return;
     this.selection.clear();
     this.highlight.targets = [];
-    this.editor.deactivate();
+    this.editor.stop();
     this.app.render();
   }
 
@@ -330,11 +337,11 @@ export class MindMap {
     this.highlight.targets = nodes;
     this.highlight.color = ACTIVE_COLOR;
     if (nodes.length === 1) {
-      this.editor.start(nodes[0], { passive: true });
+      this.editor.start(nodes[0]);
       this.scrollNodeIntoView(nodes[0]);
     } else {
       // 多选态没有编辑框，退出可能残留的单选覆盖层
-      this.editor.deactivate();
+      this.editor.stop();
     }
     this.app.render();
   }
@@ -389,7 +396,7 @@ export class MindMap {
           this.dragMoved = true;
           if (this.selection.size) {
             this.selection.clear();
-            this.editor.deactivate();
+            this.editor.stop();
           }
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
           this.dragFills.clear();
@@ -453,7 +460,7 @@ export class MindMap {
       // 进入框选即退出选中态（覆盖层交还 canvas，多选态无编辑框），仅首帧执行一次
       if (this.selection.size) {
         this.selection.clear();
-        this.editor.deactivate();
+        this.editor.stop();
       }
       // 拖动过程中实时应用激活样式：当前与选框相交的节点立刻高亮
       this.highlight.targets = this.textsInRect(
@@ -471,7 +478,7 @@ export class MindMap {
           this.dragMoved = false;
           if (this.pressOnActive) {
             this.pressOnActive = false;
-            this.wakeEditing(e);
+            this.wake(true, { x: e.clientX, y: e.clientY });
           }
           return;
         }
@@ -484,7 +491,7 @@ export class MindMap {
       const down = this.overlayDown;
       this.overlayDown = null;
       if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3) {
-        this.wakeEditing(e);
+        this.wake(true, { x: e.clientX, y: e.clientY });
       }
       const marquee = this.marqueeDown;
       this.marqueeDown = null;
@@ -777,13 +784,13 @@ export class MindMap {
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   private onGlobalKeydown = (e: KeyboardEvent) => {
     // 覆盖层持焦时其 keydown 处理器已接管；失焦挂载态才走到这里
-    if (this.editor.isEditing && this.editor.hasFocus()) return;
+    if (this.editor.hasFocus()) return;
     // 仅响应画布或页面空白处的按键，页面其它控件输入不受影响
     const target = e.target as HTMLElement;
     if (target !== document.body && target !== this.app.canvas) return;
     // 撤销/重做快捷键：仅非编辑态响应（编辑态内撤销由输入框原生行为处理）；
     // 需在下方修饰键直接放行之前判定。Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做
-    if (!this.editor.isEditing && (e.ctrlKey || e.metaKey)) {
+    if (!this.editing && (e.ctrlKey || e.metaKey)) {
       const key = e.key.toLowerCase();
       if (key === "z") {
         e.preventDefault();
@@ -813,12 +820,12 @@ export class MindMap {
       this.navigate(e.key);
       return;
     }
-    // 打字或 IME 组合：重新聚焦常驻覆盖层并唤醒编辑态，默认输入/组合直接落在其上（不吞键，IME 首字符不丢）
+    // 打字或 IME 组合：唤醒编辑态并聚焦常驻覆盖层，默认输入/组合直接落在其上（不吞键，IME 首字符不丢）
     if (
       (e.key.length === 1 || e.keyCode === 229 || e.key === "Process") &&
       this.active
     ) {
-      this.editor.focusForTyping();
+      this.wake();
     }
   };
 
@@ -948,27 +955,12 @@ export class MindMap {
     this.editor.reposition();
   }
 
-  // 编辑框按键两态机（飞书模型）——以 DOM 类名为唯一状态来源（覆盖层常驻，blur/唤醒随时切换外观）：
-  // 激活态（passive 类，文字透明、由 canvas 渲染）：方向键拦截并切换节点；打字/IME/点击唤醒编辑态交还默认行为
-  // 编辑态（覆盖层文字可见，canvas 停止渲染）：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
+  // 编辑框按键两态机（飞书模型）——以 this.editing 为唯一状态来源（覆盖层常驻，blur/唤醒随时切换显隐）：
+  // 激活态（editing=false，覆盖层隐藏、文字由 canvas 渲染）：方向键拦截并切换节点；打字/IME/点击唤醒编辑态交还默认行为
+  // 编辑态（editing=true，覆盖层接管文字渲染）：方向键移动光标；Tab 建子节点；Enter/Escape 提交（切回激活态视觉）
   private bindNodeKeys(el: HTMLDivElement, text: Text) {
-    // 唤醒为编辑态：canvas 停止渲染文字；fill 为 true（点击进入）时填入节点文本做正常编辑，
-    // 打字/IME/粘贴进入则保持空覆盖层（输入内容经 input 同步替换节点文本）
-    const wake = (fill = false) => {
-      this.editor.beginEdit(fill);
-      this.setHighlightEditing(true);
-    };
     el.addEventListener("keydown", (e) => {
-      const passive = el.classList.contains("silker-text-passive");
-      // 临时诊断日志（复现问题后移除）
-      console.log(
-        "[SilkerKeys] keydown",
-        JSON.stringify(e.key),
-        "keyCode=",
-        e.keyCode,
-        "passive=",
-        passive,
-      );
+      const passive = !this.editing;
       if (passive && e.key.startsWith("Arrow")) {
         // 激活态方向键：接管为节点导航（覆盖层随 activate 转移到新节点）
         e.preventDefault();
@@ -977,7 +969,7 @@ export class MindMap {
       }
       if (passive && e.key === "Escape") {
         e.preventDefault();
-        this.editor.enterPassive();
+        this.editor.hide();
         return;
       }
       if (passive && e.key === "Enter") {
@@ -992,13 +984,13 @@ export class MindMap {
         void this.deleteSelection();
         return;
       }
-      // 可打印字符或 IME 组合键：仅唤醒为编辑态（canvas 停止渲染文字），不吞键 ——
+      // 可打印字符或 IME 组合键：仅唤醒为编辑态（覆盖层接管文字渲染），不吞键 ——
       // 打字/组合直接落入空覆盖层，经 input 同步替换节点文本
       if (
         passive &&
         (e.key.length === 1 || e.key === "Process" || e.keyCode === 229)
       ) {
-        wake();
+        this.wake();
         return;
       }
       if (e.key === "Tab") {
@@ -1006,20 +998,22 @@ export class MindMap {
         // 覆盖层常驻：节点切换由 activate → editor.start 完成卸载重建，无需先失焦
         void this.createRelated(e, text);
       } else if (e.key === "Enter" || e.key === "Escape") {
-        // 阻止换行，提交 = 切回激活态视觉（覆盖层保持挂载可编辑，IME 不被打断），高亮环切回蓝色
+        // 阻止换行，提交 = 切回激活态（覆盖层隐藏并保持挂载可编辑，IME 不被打断），高亮环切回蓝色
         e.preventDefault();
-        this.editor.enterPassive();
+        this.editor.hide();
+        this.editing = false;
         this.setHighlightEditing(false);
       }
     });
-    // 打字/组合/粘贴：空覆盖层唤醒（输入替换节点文本）；左键按下：与画布按下共用拖拽上下文，
+    // 打字/组合：空覆盖层唤醒（输入替换节点文本）；右键菜单粘贴不经过 keydown，
+    // 由覆盖层的 paste 监听先行显示（本处 input 唤醒补齐编辑态状态）；左键按下：与画布按下共用拖拽上下文，
     // 未超阈值松手（mouseup 统一判定）才视为点击进入编辑，避免拖拽激活节点时误触发编辑
-    el.addEventListener("input", () => wake());
-    el.addEventListener("compositionstart", () => wake());
+    el.addEventListener("input", () => this.wake());
+    el.addEventListener("compositionstart", () => this.wake());
     el.addEventListener("mousedown", (e) => {
       if (e.button !== 0) {
         // 非左键（如右键菜单粘贴前）保持原行为：立即唤醒
-        wake(true);
+        this.wake(true);
         return;
       }
       // 覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
