@@ -719,14 +719,31 @@ export class MindMap {
       }[] = [];
       for (const n of nodes) {
         const old = n.parent as Text;
-        // 目标就是当前父级：无变化，不建命令
-        if (old === parent) continue;
         // 原父级也在被拖子树内（多选时父子同选）：保持原父子结构，跟随父级一起挂载
         if (subtree.has(old)) continue;
         // 基于落点垂直位置插入到目标子节点列表的对应位置，而非一律追加到最后
-        const newIndex =
-          insertIndex.get(parent) ?? this.dropIndex(parent, dropY);
+        let newIndex = insertIndex.get(parent) ?? this.dropIndex(parent, dropY);
         insertIndex.set(parent, newIndex + 1);
+        // 同父移动：落点序号按原布局含自身统计，落在原位置之后时需扣掉自身；
+        // 扣除后与原位置相同则确实无变化，跳过
+        if (old === parent) {
+          if (newIndex > old.children.indexOf(n)) newIndex--;
+          if (newIndex === old.children.indexOf(n)) continue;
+          const edge = this.edges.find(
+            (e) => e.fromNode === old && e.toNode === n,
+          )!;
+          moves.push({
+            node: n,
+            oldParent: old,
+            oldIndex: old.children.indexOf(n),
+            newIndex,
+            oldStyle: this.nodeStyles.get(n)!,
+            newStyle: this.nodeStyles.get(n)!,
+            oldEdge: edge,
+            newEdge: edge,
+          });
+          continue;
+        }
         // 换父后新级数 = 目标级数 + 1：按新级数默认样式与用户自定义样式合并定格
         // （未配置级数样式时 redo 跳过应用，保持原样，与旧行为一致）
         const newStyle = {
