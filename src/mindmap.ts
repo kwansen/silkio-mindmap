@@ -1,4 +1,4 @@
-import { App, Text } from "@silker/core";
+import { App, Renderer, Text } from "@silker/core";
 import type { Node } from "@silker/core";
 import { Viewport, VIEWPORT_CAPABILITY } from "@silker/core-viewport";
 import type { ViewportCapability } from "@silker/core-viewport";
@@ -209,6 +209,55 @@ export class MindMap {
       children: n.children.map((c) => walk(c as Text)),
     });
     return walk(this.root);
+  }
+
+  // 导出整棵树为 PNG 图片（返回 Blob）：按树包围盒离屏渲染，白底、固定导出缩放，与当前视口无关；
+  // 只渲染树与连线，不含高亮环/选框/拖拽反馈等交互覆盖层
+  async toImage(options?: {
+    padding?: number;
+    scale?: number;
+  }): Promise<Blob> {
+    if (!this.root) throw new Error("MindMap 尚未初始化完成");
+    const padding = options?.padding ?? 24;
+    const scale = options?.scale ?? 2;
+
+    const b = this.getBounds(this.root);
+    const w = Math.ceil(b.maxX - b.minX) + padding * 2;
+    const h = Math.ceil(b.maxY - b.minY) + padding * 2;
+
+    // 离屏画布 + 独立 Renderer：构造器会把画布重置为窗口 dpr 下的 CSS 尺寸（离屏时为 0），
+    // 必须在构造之后再设置实际导出尺寸；基准变换保持恒等，缩放全部交给视口
+    // （render() 会叠加 viewport.scale，基准再乘 scale 会导致双重放大、内容被裁切）
+    const canvas = document.createElement("canvas");
+    const renderer = new Renderer(canvas);
+    canvas.width = Math.ceil(w * scale);
+    canvas.height = Math.ceil(h * scale);
+    renderer.width = canvas.width;
+    renderer.height = canvas.height;
+
+    // 视口平移使树包围盒左上角落在 padding 处，再渲染树与连线
+    renderer.setViewport({
+      x: (padding - b.minX) * scale,
+      y: (padding - b.minY) * scale,
+      scale,
+    });
+    renderer.render([this.root, ...this.edges]);
+
+    // 白底垫底：render() 开头 clearRect 会清掉先铺的底色，须在渲染完成后用
+    // destination-over 把纯白画到已有内容之下（render 后画布是透明的，PNG 需要不透明底色）
+    const ctx = renderer.ctx!;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("图片导出失败"))),
+        "image/png",
+      );
+    });
   }
 
   constructor(options: MindMapOptions) {

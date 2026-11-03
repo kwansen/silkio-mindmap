@@ -188,6 +188,18 @@ redoBtn.addEventListener("click", async () => {
   await mindmap.redo();
   refreshToolbar();
 });
+
+// 导出图片：整棵树离屏渲染为 PNG 并触发下载
+const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
+exportBtn.addEventListener("click", async () => {
+  const blob = await mindmap.toImage();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mindmap.png";
+  a.click();
+  URL.revokeObjectURL(url);
+});
 mindmap.app.render();
 refreshToolbar();
 // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
