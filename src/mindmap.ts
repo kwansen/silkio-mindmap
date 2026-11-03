@@ -380,7 +380,13 @@ export class MindMap {
       // 复位选框（清空起止点即不再绘制）
       this.marquee.start = null;
       this.marquee.end = null;
-      this.setSelection(this.textsInRect(start, end));
+      const hits = this.textsInRect(start, end);
+      if (hits.length) {
+        this.setSelection(hits);
+      } else {
+        // 未选中任何节点：setSelection([]) 走 deactivate 空路径不重绘，需手动刷新清除选框残留
+        this.app.render();
+      }
     });
   }
 
