@@ -5,6 +5,8 @@ import type { ViewportCapability } from "@silker/core-viewport";
 import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
 import type { TextEditorCapability } from "@silker/plugin-text-editor";
 import { layout } from "./layout";
+import { History } from "./history";
+import type { Command } from "./history";
 import { MindMapEdge } from "./Edge";
 import { ActiveHighlight } from "./ActiveHighlight";
 import { Marquee } from "./Marquee";
@@ -130,10 +132,53 @@ export class MindMap {
   private dragFills = new Map<Text, string>();
   // 数据变化回调（构造时从 options 记录）
   private onChange?: (type: MindMapChangeType) => void;
+  // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放
+  private history = new History();
+  // 编辑会话起点快照（仅节点引用与原文字符串，非整树快照）：onEditStart 记录，
+  // onEditEnd 对比决定是否把文本变更记入历史
+  private editingOld: { node: Text | null; text: string } = {
+    node: null,
+    text: "",
+  };
 
   // 触发数据变化回调（重布局落定后由各变更入口调用）
   private emitChange(type: MindMapChangeType) {
     this.onChange?.(type);
+  }
+
+  // 撤销：真正输入中（编辑态）或拖拽中不响应（避免与进行中的变更互踩）；激活态覆盖层
+  // （passive 视觉，文字仍由 canvas 渲染）不算编辑，撤销照常执行；回退前先清空选中态，
+  // 防止悬空引用（选中/覆盖层指向已摘除的节点）
+  async undo() {
+    if (this.editor.isTyping || this.dragState) return;
+    const cmd = this.history.undo();
+    if (!cmd) return;
+    this.selection.clear();
+    this.highlight.targets = [];
+    this.editor.deactivate();
+    await this.relayout();
+    // 直接调用字段而非 emitChange：undo/redo 不产生新变更，仅通知宿主数据已回退
+    this.onChange?.(cmd.type);
+  }
+
+  // 重做：流程与 undo 对称，方向相反
+  async redo() {
+    if (this.editor.isTyping || this.dragState) return;
+    const cmd = this.history.redo();
+    if (!cmd) return;
+    this.selection.clear();
+    this.highlight.targets = [];
+    this.editor.deactivate();
+    await this.relayout();
+    this.onChange?.(cmd.type);
+  }
+
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+
+  get canRedo(): boolean {
+    return this.history.canRedo;
   }
 
   // 导出当前数据树：文本 + 子树 + 节点自定义样式（级数默认样式不入档，避免与 levelStyles 重复）
@@ -161,12 +206,34 @@ export class MindMap {
     this.app.use(
       new TextEditor({
         onInput: () => this.relayout(),
-        onEditStart: (el, text) => this.bindNodeKeys(el, text),
+        onEditStart: (el, text) => {
+          // 编辑会话起点：定格节点与原文，编辑结束对比决定是否记入历史
+          // （覆盖层编辑是持续同步输入，无法在单次 input 边界判定"一次变更"）
+          this.editingOld = { node: text, text: text.text };
+          this.bindNodeKeys(el, text);
+        },
         // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
         onActivate: (text) => this.activate(text),
         // 失焦切回激活态视觉时同步高亮环颜色；编辑结束视为一次文本变更
         onEditEnd: () => {
           this.setHighlightEditing(false);
+          // 文本相对会话起点确有变化才记历史：newText 取编辑结束时的节点文本
+          // （此时覆盖层内容已同步进节点）；record 仅入栈不执行，因变更已发生
+          const old = this.editingOld;
+          if (old.node && old.node.text !== old.text) {
+            const node = old.node;
+            const before = old.text;
+            const after = node.text;
+            this.history.record({
+              type: "text",
+              redo: () => {
+                node.text = after;
+              },
+              undo: () => {
+                node.text = before;
+              },
+            });
+          }
           this.emitChange("text");
         },
       }),
@@ -559,38 +626,81 @@ export class MindMap {
     if (parent) {
       // 同一目标父级插入多个节点时依次后移；基座索引按原子节点位置只算一次
       const insertIndex = new Map<Text, number>();
+      // 摘除前定格每个被移动节点的原父级/原位置/原样式与两侧连线，命令据此重放与逆放
+      const moves: {
+        node: Text;
+        oldParent: Text;
+        oldIndex: number;
+        newIndex: number;
+        oldStyle: Style;
+        newStyle: Style;
+        oldEdge: MindMapEdge;
+        newEdge: MindMapEdge;
+      }[] = [];
       for (const n of nodes) {
         const old = n.parent as Text;
-        // 目标就是当前父级：无变化
+        // 目标就是当前父级：无变化，不建命令
         if (old === parent) continue;
         // 原父级也在被拖子树内（多选时父子同选）：保持原父子结构，跟随父级一起挂载
         if (subtree.has(old)) continue;
-        old.remove(n);
         // 基于落点垂直位置插入到目标子节点列表的对应位置，而非一律追加到最后
-        const index = insertIndex.get(parent) ?? this.dropIndex(parent, dropY);
-        parent.children.splice(index, 0, n);
-        n.parent = parent;
-        insertIndex.set(parent, index + 1);
-        // 换父后级数变化：按新级数默认样式与用户自定义样式合并重新应用（未配置级数样式时保持原样）
-        if (this.levelStyles.length) {
-          this.applyNodeStyle(n, {
-            ...this.levelStyle(this.depthOf(n)),
-            ...this.customStyles.get(n),
-          });
-        }
-        // 换线：移除旧父连线，加入新父连线
-        const dead = this.edges.filter(
+        const newIndex =
+          insertIndex.get(parent) ?? this.dropIndex(parent, dropY);
+        insertIndex.set(parent, newIndex + 1);
+        // 换父后新级数 = 目标级数 + 1：按新级数默认样式与用户自定义样式合并定格
+        // （未配置级数样式时 redo 跳过应用，保持原样，与旧行为一致）
+        const newStyle = {
+          ...this.levelStyle(this.depthOf(parent) + 1),
+          ...this.customStyles.get(n),
+        };
+        const oldEdge = this.edges.find(
           (e) => e.fromNode === old && e.toNode === n,
-        );
-        this.edges = this.edges.filter((e) => !dead.includes(e));
-        dead.forEach((e) => {
-          const i = this.app.children.indexOf(e);
-          if (i !== -1) this.app.children.splice(i, 1);
+        )!;
+        moves.push({
+          node: n,
+          oldParent: old,
+          oldIndex: old.children.indexOf(n),
+          newIndex,
+          oldStyle: this.nodeStyles.get(n)!,
+          newStyle,
+          oldEdge,
+          newEdge: new MindMapEdge(parent, n),
         });
-        const edge = new MindMapEdge(parent, n);
-        this.edges.push(edge);
-        this.app.add(edge);
       }
+      // 移动命令：多选目标合并为一条，undo 一次全回退（逆序插回，防同父索引失效）
+      const cmd: Command = {
+        type: "move",
+        redo: () => {
+          for (const m of moves) {
+            m.oldParent.remove(m.node);
+            parent.children.splice(m.newIndex, 0, m.node);
+            m.node.parent = parent;
+            // 换线：移除旧父连线，加入新父连线
+            this.edges = this.edges.filter((e) => e !== m.oldEdge);
+            const i = this.app.children.indexOf(m.oldEdge);
+            if (i !== -1) this.app.children.splice(i, 1);
+            this.edges.push(m.newEdge);
+            this.app.add(m.newEdge);
+            if (this.levelStyles.length)
+              this.applyNodeStyle(m.node, m.newStyle);
+          }
+        },
+        undo: () => {
+          for (const m of [...moves].reverse()) {
+            parent.remove(m.node);
+            m.oldParent.children.splice(m.oldIndex, 0, m.node);
+            m.node.parent = m.oldParent;
+            // 换线反向：移除新父连线，还原旧父连线
+            this.edges = this.edges.filter((e) => e !== m.newEdge);
+            const i = this.app.children.indexOf(m.newEdge);
+            if (i !== -1) this.app.children.splice(i, 1);
+            this.edges.push(m.oldEdge);
+            this.app.add(m.oldEdge);
+            this.applyNodeStyle(m.node, m.oldStyle);
+          }
+        },
+      };
+      this.history.exec(cmd);
     }
     await this.relayout();
     if (parent) this.emitChange("move");
@@ -671,6 +781,22 @@ export class MindMap {
     // 仅响应画布或页面空白处的按键，页面其它控件输入不受影响
     const target = e.target as HTMLElement;
     if (target !== document.body && target !== this.app.canvas) return;
+    // 撤销/重做快捷键：仅非编辑态响应（编辑态内撤销由输入框原生行为处理）；
+    // 需在下方修饰键直接放行之前判定。Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做
+    if (!this.editor.isEditing && (e.ctrlKey || e.metaKey)) {
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) void this.redo();
+        else void this.undo();
+        return;
+      }
+      if (key === "y") {
+        e.preventDefault();
+        void this.redo();
+        return;
+      }
+    }
     if (e.key === "Tab" || e.key === "Enter") {
       e.preventDefault();
       if (this.active) void this.createRelated(e, this.active);
@@ -916,22 +1042,33 @@ export class MindMap {
       text,
       this.depthOf(text) + (isChild ? 1 : 0),
     );
+    // 插入位置在构造命令前定格：Tab 建子追加到末尾，Enter 建兄弟插在当前节点之后
+    // （统一走 index splice，undo/redo 重放同一位置，不依赖创建时的树状态）
+    const index = isChild
+      ? parent.children.length
+      : parent.children.indexOf(text) + 1;
     const node = this.createNode(text, style);
     this.nodeStyles.set(node, style);
-    if (isChild) {
-      parent.add(node);
-    } else {
-      // 根节点无父时退化为在末尾追加子节点
-      const index =
-        parent === text
-          ? parent.children.length - 1
-          : parent.children.indexOf(text);
-      parent.children.splice(index + 1, 0, node);
-      node.parent = parent;
-    }
     const edge = new MindMapEdge(parent, node);
-    this.edges.push(edge);
-    this.app.add(edge);
+    // 新增节点命令：redo/undo 对称地增删子节点与连线
+    const cmd: Command = {
+      type: "add",
+      redo: () => {
+        parent.children.splice(index, 0, node);
+        node.parent = parent;
+        this.app.add(edge);
+        this.edges.push(edge);
+      },
+      undo: () => {
+        const i = parent.children.indexOf(node);
+        if (i !== -1) parent.children.splice(i, 1);
+        node.parent = null;
+        this.edges = this.edges.filter((edge2) => edge2 !== edge);
+        const ci = this.app.children.indexOf(edge);
+        if (ci !== -1) this.app.children.splice(ci, 1);
+      },
+    };
+    this.history.exec(cmd);
     this.editor.bind(node);
     await this.relayout();
     // 新节点进入激活态（常驻覆盖层，打字即编辑）
@@ -945,32 +1082,54 @@ export class MindMap {
     if (!this.root) return;
     const targets = [...this.selection].filter((n) => n !== this.root);
     if (!targets.length) return;
-    // 收集各子树内全部节点，并记住被删前各自的父级
+    // 收集全部目标子树内节点：连线清理需覆盖子树内子孙节点间的连线，不止顶层目标
     const subtree = new Set<Node>();
     const collect = (n: Node) => {
       subtree.add(n);
       n.children.forEach(collect);
     };
-    const parents: Text[] = [];
-    for (const text of targets) {
-      collect(text);
-      parents.push(text.parent as Text);
-      (text.parent as Text).remove(text);
-    }
-    // 清理起点或终点在子树内的连线，并从渲染树移除
+    targets.forEach(collect);
+    // 删除前定格各目标的父级与位置，及起点或终点在子树内的待清理连线
+    const captures = targets.map((node) => ({
+      node,
+      parent: node.parent as Text,
+      index: (node.parent as Text).children.indexOf(node),
+    }));
     const dead = this.edges.filter(
       (e) => subtree.has(e.fromNode) || subtree.has(e.toNode),
     );
-    this.edges = this.edges.filter((e) => !dead.includes(e));
-    dead.forEach((e) => {
-      const i = this.app.children.indexOf(e);
-      if (i !== -1) this.app.children.splice(i, 1);
-    });
+    // 删除命令：多选目标合并为一条，undo 一次全回退
+    const cmd: Command = {
+      type: "delete",
+      redo: () => {
+        captures.forEach(({ node, parent }) => parent.remove(node));
+        this.edges = this.edges.filter((e) => !dead.includes(e));
+        dead.forEach((e) => {
+          const i = this.app.children.indexOf(e);
+          if (i !== -1) this.app.children.splice(i, 1);
+        });
+      },
+      undo: () => {
+        // 逆序插回：同父多目标按索引从大到小还原，前序插入不影响后序索引
+        for (let i = captures.length - 1; i >= 0; i--) {
+          const { node, parent, index } = captures[i];
+          parent.children.splice(index, 0, node);
+          node.parent = parent;
+        }
+        dead.forEach((e) => {
+          this.edges.push(e);
+          this.app.add(e);
+        });
+      },
+    };
+    this.history.exec(cmd);
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
     this.selection.clear();
     this.highlight.targets = [];
     await this.relayout();
-    this.activate(parents.find((p) => !subtree.has(p)) ?? this.root);
+    this.activate(
+      captures.map((c) => c.parent).find((p) => !subtree.has(p)) ?? this.root,
+    );
     this.emitChange("delete");
   }
 

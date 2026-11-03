@@ -165,8 +165,26 @@ const mindmap = new MindMap({
   // 数据变化（新增/删除/移动/文本编辑）时打印当前数据 JSON
   onChange: (type) => {
     console.log(`[MindMap] ${type}`, JSON.stringify(mindmap.toJSON(), null, 2));
+    refreshToolbar();
   },
 });
+
+// 撤销/重做工具条：点击触发对应操作，按历史栈可用性禁用按钮（含 undo/redo 后刷新）
+const undoBtn = document.getElementById("undo-btn") as HTMLButtonElement;
+const redoBtn = document.getElementById("redo-btn") as HTMLButtonElement;
+const refreshToolbar = () => {
+  undoBtn.disabled = !mindmap.canUndo;
+  redoBtn.disabled = !mindmap.canRedo;
+};
+undoBtn.addEventListener("click", async () => {
+  await mindmap.undo();
+  refreshToolbar();
+});
+redoBtn.addEventListener("click", async () => {
+  await mindmap.redo();
+  refreshToolbar();
+});
 mindmap.app.render();
+refreshToolbar();
 // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
 (window as any).__mindmap = mindmap;
