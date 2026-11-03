@@ -173,25 +173,37 @@ export class MindMap {
     this.setHighlightEditing(true);
   }
 
-  // 命中已选中节点时建立拖拽上下文（画布按下与覆盖层按下共用），未命中或不可拖返回 false
+  // 命中可拖节点时建立拖拽上下文（画布按下与覆盖层按下共用），未命中或不可拖返回 false：
+  // 命中已选中节点 → 拖整组选中子树（根节点剔除）；命中未选中节点 → 无需先激活，单独拖它；
+  // 根节点不可拖，返回 false 交回点击编辑/框选流程
   private tryStartDrag(e: MouseEvent, hit: Text | null): boolean {
-    if (!hit || !this.selection.has(hit)) return false;
+    if (!hit) return false;
+    if (!this.selection.has(hit)) {
+      // 未选中的非根节点：拖动即单独拖它；未超阈值松手仍走 click 激活流程（不进编辑）
+      if (hit === this.root) return false;
+      this.startDrag(e, [hit], hit);
+      this.pressOnActive = false;
+      return true;
+    }
     const nodes = [...this.selection].filter((n) => n !== this.root);
     if (!nodes.length) return false;
-    const hitP = hit.getWorldPoint();
+    this.startDrag(e, nodes, hit);
+    this.pressOnActive = this.selection.size === 1;
+    return true;
+  }
+
+  // 建立拖拽上下文：定格起点、记录各节点原位与按下节点包围盒
+  private startDrag(e: MouseEvent, nodes: Text[], grabNode: Text) {
+    const grabP = grabNode.getWorldPoint();
     this.dragState = {
       startScreen: { x: e.clientX, y: e.clientY },
       startWorld: this.toWorld(e),
       nodes,
       origins: nodes.map((n) => ({ x: n.x, y: n.y })),
-      grabNode: hit,
-      grabBox: { x: hitP.x, y: hitP.y, w: hit.width, h: hit.height },
+      grabNode,
+      grabBox: { x: grabP.x, y: grabP.y, w: grabNode.width, h: grabNode.height },
     };
     this.dragMoved = false;
-    // 覆盖层激活态沉底（opacity 0 + z-index -1），按下必落在画布：单选即按在唯一激活节点上，
-    // 未超阈值松手视为点击进入编辑（多选无覆盖层，点击走 click 激活流程收敛为单选）
-    this.pressOnActive = this.selection.size === 1;
-    return true;
   }
 
   // 取消激活：清空选中集合与高亮环，移除常驻覆盖层（文字交还 canvas 渲染）
@@ -272,6 +284,8 @@ export class MindMap {
           }
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
           this.dragFills.clear();
+          // 高亮环跟随被拖节点（拖未选中节点时旧激活环需移除）
+          this.highlight.targets = drag.nodes;
           drag.nodes.forEach((n) => {
             this.dragFills.set(n, n.fill);
             n.fill = "#4b5563";
