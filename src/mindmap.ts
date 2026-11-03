@@ -1210,11 +1210,23 @@ export class MindMap {
     this.app.render();
   }
 
+  // 覆盖层置顶：换父/新增/撤销等路径会向 app.children 末尾追加新连线，跑到覆盖层之上，
+  // relayout 时统一把高亮环/拖拽反馈/折叠开关/框选矩形提升回最上层，保证绘制顺序稳定
+  private raiseOverlays() {
+    for (const n of [this.highlight, this.ghost, this.collapseToggle, this.marquee]) {
+      const i = this.app.children.indexOf(n);
+      if (i !== -1) this.app.children.splice(i, 1);
+      this.app.add(n);
+    }
+  }
+
   // 文本输入后按新尺寸重新布局并渲染（元函数组装：重排 + 渲染）
   private async relayout() {
     if (!this.root || !this.pan) return;
     // 折叠可见性联动（undo/redo 换父、拖入折叠节点等路径统一收口于此）
     this.applyCollapseVisibility();
+    // 新连线可能追加到了覆盖层之上，先归位再渲染
+    this.raiseOverlays();
     await layout(this.root, {
       direction: this.direction,
       levelGap: 80,
