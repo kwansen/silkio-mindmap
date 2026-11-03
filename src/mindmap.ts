@@ -15,6 +15,7 @@ type MindEdge = MindMapEdge | MindPathEdge
 import { ActiveHighlight } from "./ActiveHighlight";
 import { Marquee } from "./Marquee";
 import { DragGhost } from "./DragGhost";
+import { CollapseToggle, TOGGLE_RADIUS, TOGGLE_GAP } from "./CollapseToggle";
 
 export interface Style {
   color: string;
@@ -38,6 +39,8 @@ export interface MindMapNode {
   text: string;
   // 节点样式：缺省时按级数回退到 levelStyles 配置（用户数据可覆盖级数配置）
   style?: Style;
+  // 子树折叠态：true 时该节点折叠（子树隐藏），缺省为展开
+  collapsed?: boolean;
   children: MindMapNode[];
 }
 
@@ -71,8 +74,8 @@ export interface MindMapOptions {
   edgeStyle?: EdgeShape;
 }
 
-// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束
-export type MindMapChangeType = "add" | "delete" | "move" | "text";
+// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换
+export type MindMapChangeType = "add" | "delete" | "move" | "text" | "collapse";
 
 export type LayoutDirection = NonNullable<MindMapOptions["direction"]>;
 
@@ -99,6 +102,8 @@ export class MindMap {
   // 节点数据上的用户自定义样式（未自定义的节点不记录），换父重设样式时与新级数默认样式合并
   private customStyles = new WeakMap<Text, Style>();
   private highlight: ActiveHighlight;
+  // 折叠开关覆盖层：为有子节点的可见节点绘制 −/+ 圆形开关
+  private collapseToggle: CollapseToggle;
   // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（隐藏态：空覆盖层、
   // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
   // size>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
@@ -200,12 +205,13 @@ export class MindMap {
     return this.history.canRedo;
   }
 
-  // 导出当前数据树：文本 + 子树 + 节点自定义样式（级数默认样式不入档，避免与 levelStyles 重复）
+  // 导出当前数据树：文本 + 子树 + 节点自定义样式 + 折叠态（级数默认样式不入档，避免与 levelStyles 重复）
   toJSON(): MindMapNode {
     if (!this.root) throw new Error("MindMap 尚未初始化完成");
     const walk = (n: Text): MindMapNode => ({
       text: n.text,
       ...(this.customStyles.has(n) ? { style: this.customStyles.get(n)! } : {}),
+      ...(n.collapsed ? { collapsed: true } : {}),
       children: n.children.map((c) => walk(c as Text)),
     });
     return walk(this.root);
@@ -318,6 +324,9 @@ export class MindMap {
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换
     this.ghost = new DragGhost();
     this.ghost.mirror = this.direction === "left";
+    // 折叠开关覆盖层（绘制在拖拽反馈层之上、框选矩形之下），开关项渲染时实时枚举
+    this.collapseToggle = new CollapseToggle();
+    this.collapseToggle.items = () => this.collapseItems();
     // 左键框选与节点拖拽
     this.bindMarquee();
     // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
@@ -391,6 +400,70 @@ export class MindMap {
     this.app.render();
   }
 
+  // 折叠可见性联动：折叠节点的整个子树置为不可见（含连线），展开则恢复可见。
+  // 连线可见性跟随端点：任一端不可见即隐藏。relayout 统一调用，覆盖所有结构变更路径
+  private applyCollapseVisibility() {
+    if (!this.root) return;
+    const hideAll = (n: Text) => {
+      n.visible = false;
+      n.children.forEach((c) => hideAll(c as Text));
+    };
+    const walk = (n: Text) => {
+      n.visible = true;
+      n.children.forEach((c) => {
+        const t = c as Text;
+        if (n.collapsed) hideAll(t);
+        else walk(t);
+      });
+    };
+    walk(this.root);
+    this.edges.forEach((e) => {
+      e.visible = e.fromNode.visible && e.toNode.visible;
+    });
+  }
+
+  // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外
+  private collapseItems(): { node: Text; x: number; y: number; collapsed: boolean }[] {
+    if (!this.root) return [];
+    const ltr = this.direction === "right";
+    const out: { node: Text; x: number; y: number; collapsed: boolean }[] = [];
+    const walk = (n: Text) => {
+      // 隐藏子树整体跳过（折叠时子孙不可见，也不显示其开关）
+      if (!n.visible) return;
+      if (n.children.length) {
+        const p = n.getWorldPoint();
+        out.push({
+          node: n,
+          x: ltr ? p.x + n.width + TOGGLE_GAP : p.x - TOGGLE_GAP,
+          y: p.y + n.height / 2,
+          collapsed: n.collapsed,
+        });
+      }
+      n.children.forEach((c) => walk(c as Text));
+    };
+    walk(this.root);
+    return out;
+  }
+
+  // 世界坐标命中的折叠开关（留少量点击余量），未命中返回 null
+  private hitCollapseToggle(w: { x: number; y: number }): Text | null {
+    const slop = 4;
+    for (const it of this.collapseItems()) {
+      if (Math.hypot(w.x - it.x, w.y - it.y) <= TOGGLE_RADIUS + slop) {
+        return it.node;
+      }
+    }
+    return null;
+  }
+
+  // 切换折叠：翻转标志后重布局（内部统一联动可见性）；选中态指向被隐藏节点时清空
+  private async toggleCollapse(node: Text) {
+    node.collapsed = !node.collapsed;
+    if ([...this.selection].some((s) => !s.visible)) this.deactivate();
+    await this.relayout();
+    this.emitChange("collapse");
+  }
+
   // 批量设置选中（单选/多选统一入口）：
   // 单选进入激活态（常驻覆盖层 + 高亮环，必要时平移视口）；多选仅多目标高亮环，无覆盖层
   private setSelection(nodes: Text[]) {
@@ -430,6 +503,12 @@ export class MindMap {
     canvas.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       const w = this.toWorld(e);
+      // 折叠开关命中优先于节点拖拽/框选
+      const toggle = this.hitCollapseToggle(w);
+      if (toggle) {
+        void this.toggleCollapse(toggle);
+        return;
+      }
       const hit = this.hitText(w);
       // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
       if (this.tryStartDrag(e, hit)) return;
@@ -584,9 +663,9 @@ export class MindMap {
     // 先序遍历即渲染序（后绘制在上层），收集全部命中的文本节点后倒序取最上层
     const hits: Text[] = [];
     const walk = (n: Node) => {
-      // 拖拽合集虚影是克隆节点，不参与命中
+      // 拖拽合集虚影是克隆节点，不参与命中；折叠隐藏的节点不可命中
       if (n instanceof DragGhost) return;
-      if (n instanceof Text) {
+      if (n instanceof Text && n.visible) {
         // Node.hitTest 只逆变换自身矩阵，对树内嵌套节点不准；这里用完整世界矩阵换算到局部坐标再判
         const local = n.getWorldTransform().inverse().transformPoint(w);
         if (
@@ -647,8 +726,9 @@ export class MindMap {
     let best: Text | null = null;
     let bestGap = Infinity;
     let bestDy = Infinity;
-    // 后序遍历：返回以 n 为根的子树纵向跨度 [minY, maxY]
+    // 后序遍历：返回以 n 为根的子树纵向跨度 [minY, maxY]（隐藏子树不参与跨度与候选）
     const walk = (n: Node): [number, number] => {
+      if (!n.visible) return [Infinity, -Infinity];
       const p = n.getWorldPoint();
       let minY = p.y;
       let maxY = p.y + n.height;
@@ -704,6 +784,11 @@ export class MindMap {
     nodes.forEach(collect);
     const parent = target && !subtree.has(target) ? target : null;
     if (parent) {
+      // 目标处于折叠态时先展开，避免挂载后的节点被可见性联动隐藏
+      if (parent.collapsed) {
+        parent.collapsed = false;
+        this.applyCollapseVisibility();
+      }
       // 同一目标父级插入多个节点时依次后移；基座索引按原子节点位置只算一次
       const insertIndex = new Map<Text, number>();
       // 摘除前定格每个被移动节点的原父级/原位置/原样式与两侧连线，命令据此重放与逆放
@@ -811,6 +896,8 @@ export class MindMap {
     let index = 0;
     for (const child of parent.children) {
       const c = child as Text;
+      // 折叠隐藏的子节点不占位统计
+      if (!c.visible) continue;
       if (c.getWorldPoint().y + c.height / 2 < dropY) index++;
     }
     return index;
@@ -829,6 +916,8 @@ export class MindMap {
     const out: Text[] = [];
     this.collectTexts(this.root, out);
     return out.filter((n) => {
+      // 折叠隐藏的节点不参与框选
+      if (!n.visible) return false;
       const p = n.getWorldPoint();
       return (
         p.x < right &&
@@ -938,7 +1027,10 @@ export class MindMap {
     const toChild =
       this.direction === "right" ? key === "ArrowRight" : key === "ArrowLeft";
     if (toChild) {
-      if (current.children.length) this.activate(current.children[0] as Text);
+      if (!current.children.length) return;
+      // 折叠节点进入首子节点前先展开
+      if (current.collapsed) void this.toggleCollapse(current);
+      this.activate(current.children[0] as Text);
     } else if (parent) {
       this.activate(parent);
     }
@@ -968,6 +1060,8 @@ export class MindMap {
     const all: Text[] = [];
     this.collectTexts(this.root!, all);
     const cands = all.filter((n) => {
+      // 折叠隐藏的节点不参与导航
+      if (!n.visible) return false;
       if (n === current) return false;
       const p = n.getWorldPoint();
       const cy = p.y + n.height / 2;
@@ -1011,14 +1105,17 @@ export class MindMap {
     node.children.forEach((child) => this.collectTexts(child as Text, out));
   }
 
-  // 异步初始化：构造节点树 → 布局 → fit 视口 → 挂载节点与连线（元函数组装）
+  // 异步初始化：构造节点树 → 折叠可见性联动 → 布局 → fit 视口 → 挂载节点与连线（元函数组装）
   private async init(data: MindMapNode) {
-    const root = await layout(this.renderNode(data), {
+    const root = this.renderNode(data);
+    this.root = root;
+    // 数据可携带折叠态：布局前先按折叠标志联动可见性（布局器跳过折叠子树）
+    this.applyCollapseVisibility();
+    await layout(root, {
       direction: this.direction,
       levelGap: 80,
       siblingGap: 20,
     });
-    this.root = root;
     this.pan!.fit(this.getBounds(root));
     this.app.add(root);
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
@@ -1027,6 +1124,7 @@ export class MindMap {
     // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽反馈层在其上，框选矩形绘制在最顶层
     this.app.add(this.highlight);
     this.app.add(this.ghost);
+    this.app.add(this.collapseToggle);
     this.app.add(this.marquee);
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.render();
@@ -1035,6 +1133,8 @@ export class MindMap {
   // 文本输入后按新尺寸重新布局并渲染（元函数组装：重排 + 渲染）
   private async relayout() {
     if (!this.root || !this.pan) return;
+    // 折叠可见性联动（undo/redo 换父、拖入折叠节点等路径统一收口于此）
+    this.applyCollapseVisibility();
     await layout(this.root, {
       direction: this.direction,
       levelGap: 80,
@@ -1121,6 +1221,11 @@ export class MindMap {
     // 根节点回车（无父级可建兄弟节点）忽略，不创建任何节点
     if (!isChild && !text.parent) return;
     const parent = isChild ? text : ((text.parent as Text | null) ?? text);
+    // 目标父级处于折叠态时先展开，避免新建节点被可见性联动隐藏
+    if (parent.collapsed) {
+      parent.collapsed = false;
+      this.applyCollapseVisibility();
+    }
     // 新节点按级数取样式：Tab 建子节点深度 +1，Enter 建兄弟节点深度不变
     const style = this.newNodeStyle(
       text,
@@ -1258,7 +1363,10 @@ export class MindMap {
     bounds.minY = Math.min(bounds.minY, p.y);
     bounds.maxX = Math.max(bounds.maxX, p.x + node.width);
     bounds.maxY = Math.max(bounds.maxY, p.y + node.height);
-    node.children.forEach((child) => this.collectBounds(child as Text, bounds));
+    // 折叠隐藏的子树不并入包围盒（fit 视口与图片导出只覆盖可见部分）
+    node.children.forEach((child) => {
+      if ((child as Text).visible) this.collectBounds(child as Text, bounds);
+    });
   }
 
   // 计算整棵树的世界包围盒（从无穷大范围开始递归收拢）
@@ -1278,6 +1386,7 @@ export class MindMap {
   renderNode(data: MindMapNode, depth = 0): Text {
     const style = data.style ?? this.levelStyle(depth);
     const text = this.createText(data.text, style);
+    text.collapsed = data.collapsed ?? false;
     this.nodeStyles.set(text, style);
     if (data.style) this.customStyles.set(text, data.style);
     // 递归调用自身，将每个子数据转成子节点并挂到当前节点下

@@ -41,7 +41,8 @@ export function layout<T extends Node>(
 ): T {
   // 递归布局子树，返回子树内容相对节点顶部的纵向范围 [top, bottom]（top 可为负）
   function visit(node: Node): { top: number; bottom: number } {
-    if (node.children.length === 0) {
+    // 折叠节点视作叶子：子树不参与布局（保持原位，由可见性联动隐藏）
+    if (node.collapsed || node.children.length === 0) {
       return { top: 0, bottom: node.height }
     }
 
