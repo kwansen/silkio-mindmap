@@ -57,7 +57,13 @@ export interface MindMapOptions {
   // 按级数的样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度时套用最后一项。
   // 节点数据上的 style 优先于级数配置；新建节点（Tab/Enter）按其级数取样式
   levelStyles?: Style[];
+  // 数据变化回调：结构变化（新增/删除/拖拽换父）或文本编辑结束且重布局落定后触发，
+  // 供宿主持久化等后续操作；当前数据用 toJSON() 导出
+  onChange?: (type: MindMapChangeType) => void;
 }
+
+// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束
+export type MindMapChangeType = "add" | "delete" | "move" | "text";
 
 export type LayoutDirection = NonNullable<MindMapOptions["direction"]>;
 
@@ -122,10 +128,29 @@ export class MindMap {
   private dragChip: Text | null = null;
   // 拖拽中原位节点文字的原始颜色（拖拽期间转暗色，结束后恢复）
   private dragFills = new Map<Text, string>();
+  // 数据变化回调（构造时从 options 记录）
+  private onChange?: (type: MindMapChangeType) => void;
+
+  // 触发数据变化回调（重布局落定后由各变更入口调用）
+  private emitChange(type: MindMapChangeType) {
+    this.onChange?.(type);
+  }
+
+  // 导出当前数据树：文本 + 子树 + 节点自定义样式（级数默认样式不入档，避免与 levelStyles 重复）
+  toJSON(): MindMapNode {
+    if (!this.root) throw new Error("MindMap 尚未初始化完成");
+    const walk = (n: Text): MindMapNode => ({
+      text: n.text,
+      ...(this.customStyles.has(n) ? { style: this.customStyles.get(n)! } : {}),
+      children: n.children.map((c) => walk(c as Text)),
+    });
+    return walk(this.root);
+  }
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? "left";
     this.levelStyles = options.levelStyles ?? [];
+    this.onChange = options.onChange;
     this.app = new App(options.canvas);
     // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口；
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
@@ -139,8 +164,11 @@ export class MindMap {
         onEditStart: (el, text) => this.bindNodeKeys(el, text),
         // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
         onActivate: (text) => this.activate(text),
-        // 失焦切回激活态视觉时同步高亮环颜色
-        onEditEnd: () => this.setHighlightEditing(false),
+        // 失焦切回激活态视觉时同步高亮环颜色；编辑结束视为一次文本变更
+        onEditEnd: () => {
+          this.setHighlightEditing(false);
+          this.emitChange("text");
+        },
       }),
     );
     this.editor = this.app.require(TEXT_EDITOR_CAPABILITY);
@@ -565,6 +593,7 @@ export class MindMap {
       }
     }
     await this.relayout();
+    if (parent) this.emitChange("move");
     // 拖拽后保持选中：单选回到激活态（覆盖层），多选保持批量选中
     this.setSelection(nodes);
   }
@@ -907,6 +936,7 @@ export class MindMap {
     await this.relayout();
     // 新节点进入激活态（常驻覆盖层，打字即编辑）
     this.activate(node);
+    this.emitChange("add");
   }
 
   // 删除选中节点（单选/多选统一走 selection）及其整个子树（根节点不可删除）：
@@ -941,6 +971,7 @@ export class MindMap {
     this.highlight.targets = [];
     await this.relayout();
     this.activate(parents.find((p) => !subtree.has(p)) ?? this.root);
+    this.emitChange("delete");
   }
 
   // 节点在树中的级数（根节点为 0），由 parent 链向上回溯
