@@ -81,6 +81,8 @@ export class MindMap {
   private levelStyles: Style[];
   // 每个节点创建时实际使用的样式，供无级数配置时新建节点沿用参考节点样式
   private nodeStyles = new WeakMap<Text, Style>();
+  // 节点数据上的用户自定义样式（未自定义的节点不记录），换父重设样式时与新级数默认样式合并
+  private customStyles = new WeakMap<Text, Style>();
   private highlight: ActiveHighlight;
   // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（passive：空覆盖层、
   // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
@@ -531,6 +533,13 @@ export class MindMap {
         if (subtree.has(old)) continue;
         old.remove(n);
         parent.add(n);
+        // 换父后级数变化：按新级数默认样式与用户自定义样式合并重新应用（未配置级数样式时保持原样）
+        if (this.levelStyles.length) {
+          this.applyNodeStyle(n, {
+            ...this.levelStyle(this.depthOf(n)),
+            ...this.customStyles.get(n),
+          });
+        }
         // 换线：移除旧父连线，加入新父连线
         const dead = this.edges.filter(
           (e) => e.fromNode === old && e.toNode === n,
@@ -975,6 +984,7 @@ export class MindMap {
     const style = data.style ?? this.levelStyle(depth);
     const text = this.createText(data.text, style);
     this.nodeStyles.set(text, style);
+    if (data.style) this.customStyles.set(text, data.style);
     // 递归调用自身，将每个子数据转成子节点并挂到当前节点下
     data.children.forEach((child) =>
       text.add(this.renderNode(child, depth + 1)),
@@ -986,6 +996,24 @@ export class MindMap {
   private levelStyle(depth: number): Style {
     if (!this.levelStyles.length) return defaultStyle;
     return this.levelStyles[Math.min(depth, this.levelStyles.length - 1)];
+  }
+
+  // 将样式应用到已有节点（换父后级数变化时重设外观），同步刷新级数样式缓存并重测尺寸
+  private applyNodeStyle(text: Text, style: Style) {
+    text.fontSize = style.fontSize;
+    text.fontWeight = style.fontWeight;
+    text.fill = style.color;
+    text.fontFamily = style.fontFamily;
+    text.padding = style.padding;
+    text.lineHeight = style.lineHeight;
+    text.boxStyle = {
+      fill: style.backgroundColor,
+      stroke: style.borderColor,
+      lineWidth: style.borderWidth,
+      radius: style.radius,
+    };
+    this.nodeStyles.set(text, style);
+    text.measure();
   }
 
   // 由样式配置构造 Text 节点（renderNode 与新建节点共用，保证两处映射一致）
