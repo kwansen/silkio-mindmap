@@ -134,6 +134,8 @@ export class MindMap {
     // 鼠标按下的节点及其原始包围盒（合集虚影克隆它并以其为跟随锚点）
     grabNode: Text;
     grabBox: { x: number; y: number; w: number; h: number };
+    // 最近一次鼠标屏幕坐标（边缘自动平移的 rAF 循环无鼠标事件时据此重算虚影位置）
+    lastScreen: { clientX: number; clientY: number };
   } | null = null;
   private dragMoved = false;
   // 按下命中唯一激活节点（激活态覆盖层沉底，按下必落在画布）：未超阈值松手视为点击进入编辑，
@@ -336,6 +338,8 @@ export class MindMap {
     document.addEventListener("keydown", this.onGlobalKeydown);
     // 点击画布空白处取消激活态（拖拽平移不触发）
     this.app.onBlankClick = () => this.deactivate();
+    // 拖拽到画布边缘时自动平移视口（rAF 常驻循环，非拖拽时空转）
+    requestAnimationFrame(this.edgePanLoop);
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
     void this.init(options.data);
   }
@@ -390,9 +394,66 @@ export class MindMap {
         w: grabNode.width,
         h: grabNode.height,
       },
+      lastScreen: { clientX: e.clientX, clientY: e.clientY },
     };
     this.dragMoved = false;
   }
+
+  // 拖拽帧更新：按当前屏幕坐标重算合集虚影/跟随芯片/落点候选并渲染。
+  // mousemove 与边缘自动平移的 rAF 循环共用（平移后无需鼠标移动，虚影也要跟随世界坐标变化）
+  private updateDrag(pos: { clientX: number; clientY: number }) {
+    const drag = this.dragState;
+    if (!drag) return;
+    // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
+    const cur = this.toWorld(pos);
+    const dx = cur.x - drag.startWorld.x;
+    const dy = cur.y - drag.startWorld.y;
+    this.ghost.floatBox = {
+      x: drag.grabBox.x + dx,
+      y: drag.grabBox.y + dy,
+      w: drag.grabBox.w,
+      h: drag.grabBox.h,
+    };
+    // 合集虚影跟随鼠标
+    if (this.dragChip) {
+      this.dragChip.x = this.ghost.floatBox!.x;
+      this.dragChip.y = this.ghost.floatBox!.y;
+    }
+    // 候选落点：命中时跳过被拖子树，取其下方的真实目标
+    const subtree = new Set<Node>();
+    const collect = (n: Node) => {
+      subtree.add(n);
+      n.children.forEach(collect);
+    };
+    drag.nodes.forEach(collect);
+    const t = this.dropTarget(drag, subtree);
+    this.ghost.target = t;
+    this.app.render();
+  }
+
+  // 边缘自动平移：拖拽中鼠标贴近画布边缘时持续平移视口（越近越快），松手即停。
+  // 平移改变世界↔屏幕映射，需按 lastScreen 重算虚影位置（无需鼠标再动）
+  private edgePanLoop = () => {
+    const drag = this.dragState;
+    if (drag && this.dragMoved) {
+      const rect = this.app.canvas.getBoundingClientRect();
+      const zone = 48;
+      const { clientX: x, clientY: y } = drag.lastScreen;
+      const axis = (near: number, far: number) => {
+        if (near < zone) return -Math.max(4, 12 * (1 - near / zone));
+        if (far < zone) return Math.max(4, 12 * (1 - far / zone));
+        return 0;
+      };
+      const vx = axis(x - rect.left, rect.right - x);
+      const vy = axis(y - rect.top, rect.bottom - y);
+      if (vx || vy) {
+        const vp = this.app.renderer.viewport;
+        this.app.renderer.setViewport({ ...vp, x: vp.x + vx, y: vp.y + vy });
+        this.updateDrag(drag.lastScreen);
+      }
+    }
+    requestAnimationFrame(this.edgePanLoop);
+  };
 
   // 取消激活：清空选中集合与高亮环，移除常驻覆盖层（文字交还 canvas 渲染）
   private deactivate() {
@@ -546,13 +607,13 @@ export class MindMap {
     this.app.render();
   }
 
-  // 屏幕坐标转世界坐标（视口逆变换）
-  private toWorld(e: MouseEvent) {
+  // 屏幕坐标转世界坐标（视口逆变换；接受鼠标事件或裸坐标，供 rAF 循环复用）
+  private toWorld(pos: { clientX: number; clientY: number }) {
     const rect = this.app.canvas.getBoundingClientRect();
     const vp = this.app.renderer.viewport;
     return {
-      x: (e.clientX - rect.left - vp.x) / vp.scale,
-      y: (e.clientY - rect.top - vp.y) / vp.scale,
+      x: (pos.clientX - rect.left - vp.x) / vp.scale,
+      y: (pos.clientY - rect.top - vp.y) / vp.scale,
     };
   }
 
@@ -645,30 +706,9 @@ export class MindMap {
           this.ghost.add(this.dragChip);
         }
         // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
-        const cur = this.toWorld(e);
-        const dx = cur.x - drag.startWorld.x;
-        const dy = cur.y - drag.startWorld.y;
-        this.ghost.floatBox = {
-          x: drag.grabBox.x + dx,
-          y: drag.grabBox.y + dy,
-          w: drag.grabBox.w,
-          h: drag.grabBox.h,
-        };
-        // 合集虚影跟随鼠标
-        if (this.dragChip) {
-          this.dragChip.x = this.ghost.floatBox!.x;
-          this.dragChip.y = this.ghost.floatBox!.y;
-        }
-        // 候选落点：命中时跳过被拖子树，取其下方的真实目标
-        const subtree = new Set<Node>();
-        const collect = (n: Node) => {
-          subtree.add(n);
-          n.children.forEach(collect);
-        };
-        drag.nodes.forEach(collect);
-        const t = this.dropTarget(drag, subtree);
-        this.ghost.target = t;
-        this.app.render();
+        // （虚影/落点计算在 updateDrag，与边缘自动平移共用）
+        drag.lastScreen = { clientX: e.clientX, clientY: e.clientY };
+        this.updateDrag(e);
         return;
       }
       const down = this.marqueeDown;
