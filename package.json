@@ -19,6 +19,7 @@
     "@silker/plugin-edge": "workspace:*",
     "@silker/plugin-text-editor": "workspace:*",
     "@silker/plugin-exporter": "workspace:*",
+    "@silker/plugin-selection": "workspace:*",
     "@silker/core-viewport": "workspace:*"
   },
   "devDependencies": {

@@ -6,6 +6,8 @@ import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
 import type { TextEditorCapability } from "@silker/plugin-text-editor";
 import { Exporter, EXPORT_CAPABILITY } from "@silker/plugin-exporter";
 import type { ExportOptions } from "@silker/plugin-exporter";
+import { Selection, selectionCapabilityKey } from "@silker/plugin-selection";
+import type { SelectionCapability } from "@silker/plugin-selection";
 import { layout } from "./layout";
 import { History } from "./history";
 import type { Command } from "./history";
@@ -15,7 +17,6 @@ import type { EdgeShape } from "@silker/plugin-edge";
 // 思维导图连线类型：贝塞尔单段（MindMapEdge）或直线引出接入（MindPathEdge，path / zBezier）
 type MindEdge = MindMapEdge | MindPathEdge
 import { ActiveHighlight } from "./ActiveHighlight";
-import { Marquee } from "./Marquee";
 import { DragGhost } from "./DragGhost";
 import { CollapseToggle, TOGGLE_RADIUS, TOGGLE_GAP } from "./CollapseToggle";
 
@@ -109,22 +110,17 @@ export class MindMap {
   // 悬浮展开态开关所属节点集合（− 按需显示的数据源）：鼠标压在「节点 + 到各可见子节点
   // 连线」构成的覆盖矩形（或其开关圆）内；父子区域嵌套时可同时命中多个
   private hoverToggles = new Set<Text>();
-  // 选中状态（唯一数据源）：size===1 为单选激活态——常驻覆盖层（隐藏态：空覆盖层、
-  // 文字由 canvas 渲染，视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
-  // size>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
-  private selection = new Set<Text>();
+  // 选中状态（唯一数据源在 Selection 插件，本字段为能力引用）：
+  // items length===1 为单选激活态——常驻覆盖层（隐藏态：空覆盖层、文字由 canvas 渲染，
+  // 视觉零抖动），打字唤醒为编辑态（输入替换节点文本），点击唤醒则填入文本正常编辑；
+  // length>1 为多选（无覆盖层，Tab/Enter/打字唤醒不生效，方向键以选集左上角节点为锚点）
+  private sel: SelectionCapability<Text>;
   // 单选派生：多选或无选中时为 null（Tab/Enter、打字唤醒仅单选生效）
   private get active(): Text | null {
-    return this.selection.size === 1 ? ([...this.selection][0] as Text) : null;
+    return this.sel.items.length === 1
+      ? (this.sel.items[0] as Text)
+      : null;
   }
-  private marquee: Marquee;
-  // 左键按下状态：屏幕坐标用于位移阈值判断，世界坐标作为选框起点
-  private marqueeDown: {
-    sx: number;
-    sy: number;
-    wx: number;
-    wy: number;
-  } | null = null;
   // 拖拽换父：原位虚影框 + 跟随鼠标合集矩形 + 落点连线（可放置提示）
   private ghost: DragGhost;
   // 拖拽上下文：起点（屏幕/世界）、拖动的子树根、起始局部坐标与合集原始包围盒
@@ -187,9 +183,7 @@ export class MindMap {
     if (this.editing || this.dragState) return;
     const cmd = this.history.undo();
     if (!cmd) return;
-    this.selection.clear();
-    this.highlight.targets = [];
-    this.editor.stop();
+    this.deactivate();
     await this.relayout();
     // 直接调用字段而非 emitChange：undo/redo 不产生新变更，仅通知宿主数据已回退
     this.onChange?.(cmd.type);
@@ -200,9 +194,7 @@ export class MindMap {
     if (this.editing || this.dragState) return;
     const cmd = this.history.redo();
     if (!cmd) return;
-    this.selection.clear();
-    this.highlight.targets = [];
-    this.editor.stop();
+    this.deactivate();
     await this.relayout();
     this.onChange?.(cmd.type);
   }
@@ -296,10 +288,23 @@ export class MindMap {
       }),
     );
     this.editor = this.app.require(TEXT_EDITOR_CAPABILITY);
+    // 安装选中插件：单选/多选模型与框选会话（机制），选中语义（激活态覆盖层、
+    // 高亮环、视口跟随）由本场景定义；框选命中规则 = 可见文本节点与矩形相交
+    this.app.use(new Selection<Text>({ hitRect: (rect) => this.textsInRect(rect) }));
+    this.sel = this.app.require(selectionCapabilityKey<Text>());
+    // 框选首帧成框：退出选中态（覆盖层交还 canvas，多选态无编辑框）
+    this.sel.onMarqueeStart = () => this.deactivate();
+    // 拖框中实时应用激活样式：当前与选框相交的节点立刻高亮
+    this.sel.onMarqueeMove = (_rect, hits) => {
+      this.highlight.targets = hits;
+    };
+    // 框选落定：与选框相交的节点进入选中态（未选中任何节点时保持退出态，
+    // 选框残留由插件松手时统一渲染清除）
+    this.sel.onMarqueeEnd = (_rect, hits) => {
+      if (hits.length) this.setSelection(hits);
+    };
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight();
-    // 框选矩形（init 中最后 add，绘制在一切之上）
-    this.marquee = new Marquee(() => this.app.renderer.viewport.scale);
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换
     this.ghost = new DragGhost();
     this.ghost.mirror = this.direction === "left";
@@ -340,16 +345,16 @@ export class MindMap {
     if (!hit) return false;
     // 根节点不可拖动（无父可换），按下走视口平移
     if (hit === this.root) return false;
-    if (!this.selection.has(hit)) {
+    if (!this.sel.has(hit)) {
       // 未选中的节点：拖动即单独拖它；未超阈值松手仍走 click 激活流程（不进编辑）
       this.startDrag(e, [hit], hit);
       this.pressOnActive = false;
       return true;
     }
-    const nodes = [...this.selection].filter((n) => n !== this.root);
+    const nodes = [...this.sel.items].filter((n) => n !== this.root);
     if (!nodes.length) return false;
     this.startDrag(e, nodes, hit);
-    this.pressOnActive = this.selection.size === 1;
+    this.pressOnActive = this.sel.items.length === 1;
     return true;
   }
 
@@ -431,8 +436,8 @@ export class MindMap {
 
   // 取消激活：清空选中集合与高亮环，移除常驻覆盖层（文字交还 canvas 渲染）
   private deactivate() {
-    if (!this.selection.size) return;
-    this.selection.clear();
+    if (!this.sel.items.length) return;
+    this.sel.clear();
     this.highlight.targets = [];
     this.editor.stop();
     this.app.requestRender();
@@ -466,7 +471,7 @@ export class MindMap {
     if (!this.root) return [];
     const ltr = this.direction === "right";
     // 拖拽或框选进行中隐藏全部展开态开关，避免与交互反馈叠加
-    const busy = this.dragState !== null || this.marqueeDown !== null;
+    const busy = this.dragState !== null || this.sel.marqueeActive;
     const out: { node: Text; x: number; y: number; collapsed: boolean }[] = [];
     const walk = (n: Text) => {
       // 隐藏子树整体跳过（折叠时子孙不可见，也不显示其开关）
@@ -503,7 +508,7 @@ export class MindMap {
     node.collapsed = !node.collapsed;
     if (node.collapsed) this.hoverToggles.delete(node);
     else this.hoverToggles.add(node);
-    if ([...this.selection].some((s) => !s.visible)) this.deactivate();
+    if ([...this.sel.items].some((s) => !s.visible)) this.deactivate();
     await this.relayout();
     this.emitChange("collapse");
   }
@@ -568,8 +573,8 @@ export class MindMap {
       this.deactivate();
       return;
     }
-    this.selection = new Set(nodes);
-    this.highlight.targets = nodes;
+    this.sel.set(nodes);
+    this.highlight.targets = [...nodes];
     this.highlight.color = ACTIVE_COLOR;
     if (nodes.length === 1) {
       this.editor.start(nodes[0]);
@@ -610,7 +615,7 @@ export class MindMap {
       // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
       if (this.tryStartDrag(e, hit)) return;
       // 未建立拖拽上下文但命中已选中节点（如根节点）：记录按下位置供 mouseup 判定点击进入编辑
-      if (hit && this.selection.has(hit)) {
+      if (hit && this.sel.has(hit)) {
         this.overlayDown = { x: e.clientX, y: e.clientY };
       }
       // 根节点不可拖拽：按下改为经视口能力平移画布，不进入框选
@@ -618,7 +623,8 @@ export class MindMap {
         this.pan?.beginPan(e);
         return;
       }
-      this.marqueeDown = { sx: e.clientX, sy: e.clientY, wx: w.x, wy: w.y };
+      // 空白按下：框选会话由选中插件接管（橡皮筋 + 松手落定多选）
+      this.sel.beginMarquee(e);
     });
     // 悬浮驱动展开态开关显隐：压在连线覆盖矩形（或其开关圆）内显示 −，离开即隐藏；
     // 集合变化才重绘。激活节点被覆盖层遮住时 canvas 收不到 move，悬浮态保持不闪断
@@ -653,10 +659,7 @@ export class MindMap {
         // 首帧进入拖拽：退出选中态（含覆盖层）、节点本体降透明度形成原位虚影、定格各包围盒
         if (!this.dragMoved) {
           this.dragMoved = true;
-          if (this.selection.size) {
-            this.selection.clear();
-            this.editor.stop();
-          }
+          this.deactivate();
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
           this.dragFills.clear();
           // 高亮环跟随被拖子树：拖拽父节点时其可见子孙同样加虚线环（折叠隐藏的子树
@@ -684,29 +687,7 @@ export class MindMap {
         // （虚影/落点计算在 updateDrag，与边缘自动平移共用）
         drag.lastScreen = { clientX: e.clientX, clientY: e.clientY };
         this.updateDrag(e);
-        return;
       }
-      const down = this.marqueeDown;
-      if (!down) return;
-      // 位移超过阈值才进入框选，普通点击不画框
-      if (
-        !this.marquee.start &&
-        Math.hypot(e.clientX - down.sx, e.clientY - down.sy) <= 3
-      )
-        return;
-      this.marquee.start = { x: down.wx, y: down.wy };
-      this.marquee.end = this.toWorld(e);
-      // 进入框选即退出选中态（覆盖层交还 canvas，多选态无编辑框），仅首帧执行一次
-      if (this.selection.size) {
-        this.selection.clear();
-        this.editor.stop();
-      }
-      // 拖动过程中实时应用激活样式：当前与选框相交的节点立刻高亮
-      this.highlight.targets = this.textsInRect(
-        this.marquee.start,
-        this.marquee.end,
-      );
-      this.app.requestRender();
     });
     window.addEventListener("mouseup", (e) => {
       const drag = this.dragState;
@@ -731,20 +712,6 @@ export class MindMap {
       this.overlayDown = null;
       if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3) {
         this.wake(true, { x: e.clientX, y: e.clientY });
-      }
-      const marquee = this.marqueeDown;
-      this.marqueeDown = null;
-      if (!marquee || !this.marquee.start || !this.marquee.end) return;
-      const { start, end } = this.marquee;
-      // 复位选框（清空起止点即不再绘制）
-      this.marquee.start = null;
-      this.marquee.end = null;
-      const hits = this.textsInRect(start, end);
-      if (hits.length) {
-        this.setSelection(hits);
-      } else {
-        // 未选中任何节点：setSelection([]) 走 deactivate 空路径不重绘，需手动刷新清除选框残留
-        this.app.requestRender();
       }
     });
   }
@@ -999,15 +966,12 @@ export class MindMap {
   }
 
   // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）
-  private textsInRect(
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-  ): Text[] {
+  private textsInRect(rect: { x: number; y: number; width: number; height: number }): Text[] {
     if (!this.root) return [];
-    const left = Math.min(a.x, b.x);
-    const right = Math.max(a.x, b.x);
-    const top = Math.min(a.y, b.y);
-    const bottom = Math.max(a.y, b.y);
+    const left = rect.x;
+    const right = rect.x + rect.width;
+    const top = rect.y;
+    const bottom = rect.y + rect.height;
     const out: Text[] = [];
     this.collectTexts(this.root, out);
     return out.filter((n) => {
@@ -1132,7 +1096,7 @@ export class MindMap {
   // 多选时以选集左上角节点为锚点，先收敛为单选再导航（Tab/Enter 在多选下不生效，见 onGlobalKeydown）
   private navigate(key: string) {
     if (!this.root) return;
-    if (!this.selection.size) {
+    if (!this.sel.items.length) {
       this.activate(this.root);
       return;
     }
@@ -1158,7 +1122,7 @@ export class MindMap {
 
   // 选集中最靠左上角的节点：先取最上（y 最小，0.5 容差抗浮点误差），同高取最左（x 最小）
   private topLeftSelection(): Text {
-    return [...this.selection].reduce((best, n) => {
+    return [...this.sel.items].reduce((best, n) => {
       const bp = best.getWorldPoint();
       const np = n.getWorldPoint();
       if (np.y < bp.y - 0.5) return n;
@@ -1241,19 +1205,19 @@ export class MindMap {
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.collectEdges(root, this.edges);
     this.app.add(this.edges);
-    // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽反馈层在其上，框选矩形绘制在最顶层
+    // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽反馈层在其上
     this.app.add(this.highlight);
     this.app.add(this.ghost);
     this.app.add(this.collapseToggle);
-    this.app.add(this.marquee);
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.requestRender();
   }
 
   // 覆盖层置顶：换父/新增/撤销等路径会向 app.children 末尾追加新连线，跑到覆盖层之上，
-  // relayout 时统一把高亮环/拖拽反馈/折叠开关/框选矩形提升回最上层，保证绘制顺序稳定
+  // relayout 时统一把高亮环/拖拽反馈/折叠开关提升回最上层，保证绘制顺序稳定
+  // （框选橡皮筋由选中插件在会话内挂载，不在常驻覆盖层之列）
   private raiseOverlays() {
-    for (const n of [this.highlight, this.ghost, this.collapseToggle, this.marquee]) {
+    for (const n of [this.highlight, this.ghost, this.collapseToggle]) {
       const i = this.app.children.indexOf(n);
       if (i !== -1) this.app.children.splice(i, 1);
       this.app.add(n);
@@ -1404,7 +1368,7 @@ export class MindMap {
   // 摘除各子树、清理关联连线，重布局后激活第一个被删节点的存活父级（均被删时退化为根节点）
   private async deleteSelection() {
     if (!this.root) return;
-    const targets = [...this.selection].filter((n) => n !== this.root);
+    const targets = [...this.sel.items].filter((n) => n !== this.root);
     if (!targets.length) return;
     // 收集全部目标子树内节点：连线清理需覆盖子树内子孙节点间的连线，不止顶层目标
     const subtree = new Set<Node>();
@@ -1448,8 +1412,7 @@ export class MindMap {
     };
     this.history.exec(cmd);
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
-    this.selection.clear();
-    this.highlight.targets = [];
+    this.deactivate();
     await this.relayout();
     this.activate(
       captures.map((c) => c.parent).find((p) => !subtree.has(p)) ?? this.root,
@@ -1461,11 +1424,11 @@ export class MindMap {
   // 沿祖先链过滤只留最顶层节点——子孙会随祖先子树整体序列化，若重复入队
   // （选中 a、b、c 且 a→b→c），粘贴时同一分支会被添加两份
   private copySelection() {
-    if (!this.selection.size) return;
-    const roots = [...this.selection].filter((n) => {
+    if (!this.sel.items.length) return;
+    const roots = [...this.sel.items].filter((n) => {
       let p = n.parent as Text | null;
       while (p) {
-        if (this.selection.has(p)) return false;
+        if (this.sel.has(p)) return false;
         p = p.parent as Text | null;
       }
       return true;
