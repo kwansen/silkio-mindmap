@@ -693,10 +693,11 @@ export class MindMap {
           }
           // 原位虚影不用 opacity（多层父级叠加后几乎不可见）：文字转暗色 + 高亮环切虚线暗蓝
           this.dragFills.clear();
-          // 高亮环跟随被拖子树：拖拽父节点时其子孙节点同样加虚线环（拖未选中节点时旧激活环需移除）
+          // 高亮环跟随被拖子树：拖拽父节点时其可见子孙同样加虚线环（折叠隐藏的子树
+          // 不画环，否则折叠拖拽时会出现幽灵环；拖未选中节点时旧激活环需移除）
           const targets = new Set<Text>();
           const collectTargets = (n: Node) => {
-            if (targets.has(n as Text)) return;
+            if (targets.has(n as Text) || !(n as Text).visible) return;
             targets.add(n as Text);
             n.children.forEach(collectTargets);
           };

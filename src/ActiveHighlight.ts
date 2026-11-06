@@ -17,6 +17,8 @@ export class ActiveHighlight extends Node {
     ctx.lineWidth = 2;
     if (this.dashed) ctx.setLineDash([5, 4]);
     for (const t of this.targets) {
+      // 折叠隐藏的节点不画环（兜底：调用方漏过滤时不出现幽灵环）
+      if (!t.visible) continue;
       const p = t.getWorldPoint();
       ctx.beginPath();
       // 紧贴节点包围盒（无外边距），圆角沿用节点自身圆角，视觉与节点形状一致
