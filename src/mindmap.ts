@@ -436,7 +436,7 @@ export class MindMap {
     drag.nodes.forEach(collect);
     const t = this.dropTarget(drag, subtree);
     this.ghost.target = t;
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 边缘自动平移：拖拽中鼠标贴近画布边缘时持续平移视口（越近越快），松手即停。
@@ -469,7 +469,7 @@ export class MindMap {
     this.selection.clear();
     this.highlight.targets = [];
     this.editor.stop();
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 折叠可见性联动：折叠节点的整个子树置为不可见（含连线），展开则恢复可见。
@@ -612,7 +612,7 @@ export class MindMap {
       // 多选态没有编辑框，退出可能残留的单选覆盖层
       this.editor.stop();
     }
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 屏幕坐标转世界坐标（视口逆变换；接受鼠标事件或裸坐标，供 rAF 循环复用）
@@ -663,13 +663,13 @@ export class MindMap {
         next.size === cur.size && [...next].every((n) => cur.has(n));
       if (!same) {
         this.hoverToggles = next;
-        this.app.render();
+        this.app.requestRender();
       }
     });
     canvas.addEventListener("mouseleave", () => {
       if (this.hoverToggles.size) {
         this.hoverToggles.clear();
-        this.app.render();
+        this.app.requestRender();
       }
     });
     window.addEventListener("mousemove", (e) => {
@@ -739,7 +739,7 @@ export class MindMap {
         this.marquee.start,
         this.marquee.end,
       );
-      this.app.render();
+      this.app.requestRender();
     });
     window.addEventListener("mouseup", (e) => {
       const drag = this.dragState;
@@ -777,7 +777,7 @@ export class MindMap {
         this.setSelection(hits);
       } else {
         // 未选中任何节点：setSelection([]) 走 deactivate 空路径不重绘，需手动刷新清除选框残留
-        this.app.render();
+        this.app.requestRender();
       }
     });
   }
@@ -1059,7 +1059,7 @@ export class MindMap {
   // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
   private setHighlightEditing(editing: boolean) {
     this.highlight.color = editing ? EDITING_COLOR : ACTIVE_COLOR;
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
@@ -1084,7 +1084,7 @@ export class MindMap {
           : 0;
     if (dx === 0 && dy === 0) return;
     this.app.renderer.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy });
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
@@ -1280,7 +1280,7 @@ export class MindMap {
     this.app.add(this.collapseToggle);
     this.app.add(this.marquee);
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
-    this.app.render();
+    this.app.requestRender();
   }
 
   // 覆盖层置顶：换父/新增/撤销等路径会向 app.children 末尾追加新连线，跑到覆盖层之上，
@@ -1305,7 +1305,7 @@ export class MindMap {
       levelGap: 80,
       siblingGap: 20,
     });
-    this.app.render();
+    this.app.requestRender();
     // 布局会移动节点，编辑框必须在对齐一次，否则覆盖在旧位置上
     this.editor.reposition();
   }
