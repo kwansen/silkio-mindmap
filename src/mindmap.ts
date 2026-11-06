@@ -1,9 +1,11 @@
-import { App, Renderer, Text } from "@silker/core";
+import { App, Text } from "@silker/core";
 import type { Node } from "@silker/core";
 import { Viewport, VIEWPORT_CAPABILITY } from "@silker/core-viewport";
 import type { ViewportCapability } from "@silker/core-viewport";
 import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
 import type { TextEditorCapability } from "@silker/plugin-text-editor";
+import { Exporter, EXPORT_CAPABILITY } from "@silker/plugin-exporter";
+import type { ExportOptions } from "@silker/plugin-exporter";
 import { layout } from "./layout";
 import { History } from "./history";
 import type { Command } from "./history";
@@ -230,52 +232,14 @@ export class MindMap {
     return walk(n);
   }
 
-  // 导出整棵树为 PNG 图片（返回 Blob）：按树包围盒离屏渲染，白底、固定导出缩放，与当前视口无关；
+  // 导出整棵树为图片（返回 Blob）：委托导出能力离屏渲染，与当前视口无关；
   // 只渲染树与连线，不含高亮环/选框/拖拽反馈等交互覆盖层
-  async toImage(options?: {
-    padding?: number;
-    scale?: number;
-  }): Promise<Blob> {
+  async toImage(options?: ExportOptions): Promise<Blob> {
     if (!this.root) throw new Error("MindMap 尚未初始化完成");
-    const padding = options?.padding ?? 24;
-    const scale = options?.scale ?? 2;
-
-    const b = this.getBounds(this.root);
-    const w = Math.ceil(b.maxX - b.minX) + padding * 2;
-    const h = Math.ceil(b.maxY - b.minY) + padding * 2;
-
-    // 离屏画布 + 独立 Renderer：构造器会把画布重置为窗口 dpr 下的 CSS 尺寸（离屏时为 0），
-    // 必须在构造之后再设置实际导出尺寸；基准变换保持恒等，缩放全部交给视口
-    // （render() 会叠加 viewport.scale，基准再乘 scale 会导致双重放大、内容被裁切）
-    const canvas = document.createElement("canvas");
-    const renderer = new Renderer(canvas);
-    canvas.width = Math.ceil(w * scale);
-    canvas.height = Math.ceil(h * scale);
-    renderer.width = canvas.width;
-    renderer.height = canvas.height;
-
-    // 视口平移使树包围盒左上角落在 padding 处，再渲染树与连线
-    renderer.setViewport({
-      x: (padding - b.minX) * scale,
-      y: (padding - b.minY) * scale,
-      scale,
-    });
-    renderer.render([this.root, ...this.edges]);
-
-    // 白底垫底：render() 开头 clearRect 会清掉先铺的底色，须在渲染完成后用
-    // destination-over 把纯白画到已有内容之下（render 后画布是透明的，PNG 需要不透明底色）
-    const ctx = renderer.ctx!;
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
-
-    return new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error("图片导出失败"))),
-        "image/png",
-      );
+    // 缺省白底（PNG 需要不透明底色），调用方可覆盖
+    return this.app.require(EXPORT_CAPABILITY).export([this.root, ...this.edges], {
+      background: "#ffffff",
+      ...options,
     });
   }
 
@@ -289,6 +253,8 @@ export class MindMap {
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
     this.app.use(new Viewport());
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
+    // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
+    this.app.use(new Exporter());
     // 安装文本编辑插件：输入时重新布局，编辑框就绪后直接监听按键新建节点（包装 add 自动绑定后续节点）；
     // install 时自注册文本编辑能力，此后仅按能力键消费
     this.app.use(
@@ -1602,16 +1568,17 @@ export class MindMap {
     });
   }
 
-  // 递归遍历子树，把每个节点的世界包围盒并入总范围（元函数：被 getBounds 调用）
+  // 递归遍历子树，把每个可见节点的世界包围盒并入总范围（元函数：被 getBounds 调用；
+  // 世界变换数学由 Core 的 Node.getBounds 契约提供）
   private collectBounds(
     node: Text,
     bounds: { minX: number; minY: number; maxX: number; maxY: number },
   ) {
-    const p = node.getWorldPoint();
-    bounds.minX = Math.min(bounds.minX, p.x);
-    bounds.minY = Math.min(bounds.minY, p.y);
-    bounds.maxX = Math.max(bounds.maxX, p.x + node.width);
-    bounds.maxY = Math.max(bounds.maxY, p.y + node.height);
+    const b = node.getBounds();
+    bounds.minX = Math.min(bounds.minX, b.minX);
+    bounds.minY = Math.min(bounds.minY, b.minY);
+    bounds.maxX = Math.max(bounds.maxX, b.maxX);
+    bounds.maxY = Math.max(bounds.maxY, b.maxY);
     // 折叠隐藏的子树不并入包围盒（fit 视口与图片导出只覆盖可见部分）
     node.children.forEach((child) => {
       if ((child as Text).visible) this.collectBounds(child as Text, bounds);
