@@ -1491,10 +1491,20 @@ export class MindMap {
     this.emitChange("delete");
   }
 
-  // 复制选中节点：把各选中节点的子树序列化入剪贴板缓冲（多选可整组复制）
+  // 复制选中节点：把各选中节点的子树序列化入剪贴板缓冲（多选可整组复制）。
+  // 沿祖先链过滤只留最顶层节点——子孙会随祖先子树整体序列化，若重复入队
+  // （选中 a、b、c 且 a→b→c），粘贴时同一分支会被添加两份
   private copySelection() {
     if (!this.selection.size) return;
-    this.clipboard = [...this.selection].map((n) => this.serializeNode(n));
+    const roots = [...this.selection].filter((n) => {
+      let p = n.parent as Text | null;
+      while (p) {
+        if (this.selection.has(p)) return false;
+        p = p.parent as Text | null;
+      }
+      return true;
+    });
+    this.clipboard = roots.map((n) => this.serializeNode(n));
   }
 
   // 粘贴剪贴板：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序追加为激活节点
