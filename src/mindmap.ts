@@ -1496,28 +1496,24 @@ export class MindMap {
     this.clipboard = [...this.selection].map((n) => this.serializeNode(n));
   }
 
-  // 粘贴剪贴板：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序插入激活节点
-  // 之后（兄弟位置，锚点为根节点时追加为其子节点），样式按插入位置的级数解析；
-  // 随后激活最后一个粘贴节点并重布局，整次粘贴记为一条可撤销的 add 命令
+  // 粘贴剪贴板：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序追加为激活节点
+  // 的子节点（追加在其子级末尾），样式按级数解析；随后激活最后一个粘贴节点并重布局，
+  // 整次粘贴记为一条可撤销的 add 命令
   private async pasteClipboard() {
     if (!this.clipboard?.length || !this.root) return;
     const anchor = this.active;
     if (!anchor) return;
-    // 锚点为根节点（无父可建兄弟）时退化为追加子节点；目标父级折叠时先展开，
-    // 避免粘贴节点被可见性联动隐藏
-    const isRootAnchor = anchor === this.root;
-    const parent = isRootAnchor ? anchor : (anchor.parent as Text);
+    // 目标父级即激活节点，处于折叠态时先展开，避免粘贴节点被可见性联动隐藏
+    const parent = anchor;
     if (parent.collapsed) {
       parent.collapsed = false;
       this.applyCollapseVisibility();
     }
-    // 插入位置在构造命令前定格：锚点之后按序插入（统一走 index splice，
+    // 插入位置在构造命令前定格：追加到子级末尾（统一走 index splice，
     // undo/redo 重放同一索引，不依赖粘贴时的树状态）
-    const index = isRootAnchor
-      ? parent.children.length
-      : parent.children.indexOf(anchor) + 1;
-    // 新节点级数 = 挂载父级级数 + 1（兄弟粘贴与根下追加统一按此解析级数样式）；
-    // renderNode 递归还原子孙与自定义样式/折叠态，子树内部连线在命令外定格创建
+    const index = parent.children.length;
+    // 新节点级数 = 激活节点级数 + 1（按级数解析样式）；renderNode 递归还原子孙
+    // 与自定义样式/折叠态，子树内部连线在命令外定格创建
     // （redo/undo 只做挂载/摘除，重复创建会导致连线翻倍且撤销残留）
     const depth = this.depthOf(parent) + 1;
     const inserts = this.clipboard.map((data, i) => {
