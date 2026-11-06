@@ -159,6 +159,9 @@ export class MindMap {
     node: null,
     text: "",
   };
+  // 复制/粘贴缓冲：存放选中节点序列化后的子树数据（文本/自定义样式/折叠态/子孙），
+  // 复制允许多选整组入档，粘贴仅在单选激活时执行（见 pasteClipboard）
+  private clipboard: MindMapNode[] | null = null;
   // 编辑态（唯一状态来源，覆盖层常驻、显隐由本状态驱动）：激活态为 false（方向键导航、
   // Enter/Escape/Delete 走节点操作），打字/IME/粘贴/点击唤醒为 true（按键交给覆盖层默认行为）。
   // 失焦、提交（Enter/Escape）与覆盖层移除时复位
@@ -213,13 +216,18 @@ export class MindMap {
   // 导出当前数据树：文本 + 子树 + 节点自定义样式 + 折叠态（级数默认样式不入档，避免与 levelStyles 重复）
   toJSON(): MindMapNode {
     if (!this.root) throw new Error("MindMap 尚未初始化完成");
-    const walk = (n: Text): MindMapNode => ({
-      text: n.text,
-      ...(this.customStyles.has(n) ? { style: this.customStyles.get(n)! } : {}),
-      ...(n.collapsed ? { collapsed: true } : {}),
-      children: n.children.map((c) => walk(c as Text)),
+    return this.serializeNode(this.root);
+  }
+
+  // 把节点子树序列化为数据节点（toJSON 与复制共用）：文本 + 自定义样式 + 折叠态 + 子孙递归
+  private serializeNode(n: Text): MindMapNode {
+    const walk = (node: Text): MindMapNode => ({
+      text: node.text,
+      ...(this.customStyles.has(node) ? { style: this.customStyles.get(node)! } : {}),
+      ...(node.collapsed ? { collapsed: true } : {}),
+      children: node.children.map((c) => walk(c as Text)),
     });
-    return walk(this.root);
+    return walk(n);
   }
 
   // 导出整棵树为 PNG 图片（返回 Blob）：按树包围盒离屏渲染，白底、固定导出缩放，与当前视口无关；
@@ -1082,11 +1090,24 @@ export class MindMap {
   // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   private onGlobalKeydown = (e: KeyboardEvent) => {
-    // 覆盖层持焦时其 keydown 处理器已接管；失焦挂载态才走到这里
-    if (this.editor.hasFocus()) return;
-    // 仅响应画布或页面空白处的按键，页面其它控件输入不受影响
+    // 覆盖层持焦时普通按键由其 keydown 处理器接管；修饰键组合（Ctrl/Cmd/Alt，
+    // 复制/粘贴/撤销等）仍走全局处理——否则激活态覆盖层会把 Ctrl+C 的 "c" 当可打印
+    // 字符唤醒编辑态。编辑态下撤销/复制交给输入框原生行为，组合键一律不拦
+    if (
+      this.editor.hasFocus() &&
+      (this.editing || !(e.ctrlKey || e.metaKey || e.altKey))
+    ) {
+      return;
+    }
+    // 仅响应画布、页面空白处的按键（覆盖层持焦放行的修饰键组合除外），页面其它控件输入不受影响
     const target = e.target as HTMLElement;
-    if (target !== document.body && target !== this.app.canvas) return;
+    if (
+      !this.editor.hasFocus() &&
+      target !== document.body &&
+      target !== this.app.canvas
+    ) {
+      return;
+    }
     // 撤销/重做快捷键：仅非编辑态响应（编辑态内撤销由输入框原生行为处理）；
     // 需在下方修饰键直接放行之前判定。Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做
     if (!this.editing && (e.ctrlKey || e.metaKey)) {
@@ -1100,6 +1121,18 @@ export class MindMap {
       if (key === "y") {
         e.preventDefault();
         void this.redo();
+        return;
+      }
+      // Ctrl/Cmd+C 复制选中节点（多选可整组复制），Ctrl/Cmd+V 粘贴（仅单选激活时生效）；
+      // 编辑态不拦截，覆盖层内粘贴走原生文本粘贴
+      if (key === "c") {
+        e.preventDefault();
+        this.copySelection();
+        return;
+      }
+      if (key === "v") {
+        e.preventDefault();
+        void this.pasteClipboard();
         return;
       }
     }
@@ -1306,6 +1339,9 @@ export class MindMap {
         void this.deleteSelection();
         return;
       }
+      // 修饰键组合（Ctrl/Cmd/Alt 系统快捷键，如复制/粘贴/撤销）：不唤醒编辑态，
+      // 放行冒泡给全局按键处理器；编辑态下本分支不触发，交给输入框原生行为
+      if (passive && (e.ctrlKey || e.metaKey || e.altKey)) return;
       // 可打印字符或 IME 组合键：仅唤醒为编辑态（覆盖层接管文字渲染），不吞键 ——
       // 打字/组合直接落入空覆盖层，经 input 同步替换节点文本
       if (
@@ -1452,6 +1488,80 @@ export class MindMap {
       captures.map((c) => c.parent).find((p) => !subtree.has(p)) ?? this.root,
     );
     this.emitChange("delete");
+  }
+
+  // 复制选中节点：把各选中节点的子树序列化入剪贴板缓冲（多选可整组复制）
+  private copySelection() {
+    if (!this.selection.size) return;
+    this.clipboard = [...this.selection].map((n) => this.serializeNode(n));
+  }
+
+  // 粘贴剪贴板：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序插入激活节点
+  // 之后（兄弟位置，锚点为根节点时追加为其子节点），样式按插入位置的级数解析；
+  // 随后激活最后一个粘贴节点并重布局，整次粘贴记为一条可撤销的 add 命令
+  private async pasteClipboard() {
+    if (!this.clipboard?.length || !this.root) return;
+    const anchor = this.active;
+    if (!anchor) return;
+    // 锚点为根节点（无父可建兄弟）时退化为追加子节点；目标父级折叠时先展开，
+    // 避免粘贴节点被可见性联动隐藏
+    const isRootAnchor = anchor === this.root;
+    const parent = isRootAnchor ? anchor : (anchor.parent as Text);
+    if (parent.collapsed) {
+      parent.collapsed = false;
+      this.applyCollapseVisibility();
+    }
+    // 插入位置在构造命令前定格：锚点之后按序插入（统一走 index splice，
+    // undo/redo 重放同一索引，不依赖粘贴时的树状态）
+    const index = isRootAnchor
+      ? parent.children.length
+      : parent.children.indexOf(anchor) + 1;
+    // 新节点级数 = 挂载父级级数 + 1（兄弟粘贴与根下追加统一按此解析级数样式）；
+    // renderNode 递归还原子孙与自定义样式/折叠态，子树内部连线在命令外定格创建
+    // （redo/undo 只做挂载/摘除，重复创建会导致连线翻倍且撤销残留）
+    const depth = this.depthOf(parent) + 1;
+    const inserts = this.clipboard.map((data, i) => {
+      const node = this.renderNode(data, depth);
+      const inner: MindEdge[] = [];
+      this.collectEdges(node, inner);
+      const edge = this.createEdge(parent, node);
+      return { parent, node, edge, inner, index: index + i };
+    });
+    // 粘贴命令：redo/undo 对称地增删子树节点、父子连线与子树内部连线
+    const cmd: Command = {
+      type: "add",
+      redo: () => {
+        inserts.forEach(({ parent: p, node, edge, inner, index: idx }) => {
+          p.children.splice(idx, 0, node);
+          node.parent = p;
+          this.app.add(edge);
+          this.app.add(inner);
+          this.edges.push(edge, ...inner);
+        });
+      },
+      undo: () => {
+        // 逆序摘除：前序摘除不影响后序兄弟索引
+        for (let i = inserts.length - 1; i >= 0; i--) {
+          const { parent: p, node, edge, inner } = inserts[i];
+          const ci = p.children.indexOf(node);
+          if (ci !== -1) p.children.splice(ci, 1);
+          node.parent = null;
+          const removed = [edge, ...inner];
+          this.edges = this.edges.filter((e) => !removed.includes(e));
+          removed.forEach((e2) => {
+            const ai = this.app.children.indexOf(e2);
+            if (ai !== -1) this.app.children.splice(ai, 1);
+          });
+        }
+      },
+    };
+    this.history.exec(cmd);
+    // 为粘贴子树绑定点击激活（app.add 包装只覆盖经它挂载的节点，splice 挂载的需手动绑定）
+    inserts.forEach(({ node }) => this.editor.bind(node));
+    await this.relayout();
+    // 最后一个粘贴节点进入激活态（常驻覆盖层，打字即编辑）
+    this.activate(inserts[inserts.length - 1].node);
+    this.emitChange("add");
   }
 
   // 节点在树中的级数（根节点为 0），由 parent 链向上回溯
