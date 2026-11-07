@@ -13,6 +13,7 @@ import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
 import { Command, COMMAND_CAPABILITY } from "@silker/plugin-command";
+import { Pointer, POINTER_CAPABILITY } from "@silker/plugin-interaction";
 import type { CommandCapability } from "@silker/plugin-command";
 import type { HistoryCommand, HistoryCapability } from "@silker/plugin-history";
 import { MindMapEdge, MindPathEdge } from "./Edge";
@@ -300,6 +301,8 @@ export class MindMap {
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
     this.app.use(new Viewport());
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
+    // 安装指针交互插件：统一事件绑定/撤销与坐标换算（机制层），交互策略由本场景声明
+    this.app.use(new Pointer());
     // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
     this.app.use(new Exporter());
     // 安装官方布局插件（树形布局自注册 mindmap.auto-layout 能力），再装配应用层传入的
@@ -371,10 +374,8 @@ export class MindMap {
     // 折叠开关覆盖层（绘制在拖拽反馈层之上、框选矩形之下），开关项渲染时实时枚举
     this.collapseToggle = new CollapseToggle();
     this.collapseToggle.items = () => this.collapseItems();
-    // 左键框选与节点拖拽
+    // 左键框选与节点拖拽（含全局按键导航，统一由指针能力绑定）
     this.bindMarquee();
-    // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
-    document.addEventListener("keydown", this.onGlobalKeydown);
     // 点击画布空白处取消激活态（拖拽平移不触发）
     this.app.onBlankClick = () => this.deactivate();
     // 拖拽到画布边缘时自动平移视口（rAF 常驻循环，非拖拽时空转）
@@ -423,7 +424,7 @@ export class MindMap {
     const grabP = grabNode.getWorldPoint();
     this.dragState = {
       startScreen: { x: e.clientX, y: e.clientY },
-      startWorld: this.toWorld(e),
+      startWorld: this.app.renderer.toWorld(e.clientX, e.clientY),
       nodes,
       origins: nodes.map((n) => ({ x: n.x, y: n.y })),
       grabNode,
@@ -444,7 +445,7 @@ export class MindMap {
     const drag = this.dragState;
     if (!drag) return;
     // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
-    const cur = this.toWorld(pos);
+    const cur = this.app.renderer.toWorld(pos.clientX, pos.clientY);
     const dx = cur.x - drag.startWorld.x;
     const dy = cur.y - drag.startWorld.y;
     this.ghost.floatBox = {
@@ -646,67 +647,59 @@ export class MindMap {
     this.app.requestRender();
   }
 
-  // 屏幕坐标转世界坐标（视口逆变换；接受鼠标事件或裸坐标，供 rAF 循环复用）
-  private toWorld(pos: { clientX: number; clientY: number }) {
-    const rect = this.app.canvas.getBoundingClientRect();
-    const vp = this.app.renderer.viewport;
-    return {
-      x: (pos.clientX - rect.left - vp.x) / vp.scale,
-      y: (pos.clientY - rect.top - vp.y) / vp.scale,
-    };
-  }
-
   // 左键交互（框选 + 拖拽换父）：
   // 按下命中已选中节点 → 拖拽上下文，超阈值后整组选中子树跟随移动，松手落点有效则换父；
   // 按下空白或未选中节点 → 框选上下文，超阈值显示选框，松手批量激活相交节点；
   // 未超阈值的普通点击不处理，交给节点激活/空白取消逻辑
   private bindMarquee() {
-    const canvas = this.app.canvas;
-    canvas.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      const w = this.toWorld(e);
-      // 折叠开关命中优先于节点拖拽/框选
-      const toggle = this.hitCollapseToggle(w);
-      if (toggle) {
-        void this.toggleCollapse(toggle);
-        return;
-      }
-      const hit = this.hitText(w);
-      // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
-      if (this.tryStartDrag(e, hit)) return;
-      // 未建立拖拽上下文但命中已选中节点（如根节点）：记录按下位置供 mouseup 判定点击进入编辑
-      if (hit && this.sel.has(hit)) {
-        this.overlayDown = { x: e.clientX, y: e.clientY };
-      }
-      // 根节点不可拖拽：按下改为经视口能力平移画布，不进入框选
-      if (hit === this.root) {
-        this.pan?.beginPan(e);
-        return;
-      }
-      // 空白按下：框选会话由选中插件接管（橡皮筋 + 松手落定多选）
-      this.sel.beginMarquee(e);
-    });
-    // 悬浮驱动展开态开关显隐：压在连线覆盖矩形（或其开关圆）内显示 −，离开即隐藏；
-    // 集合变化才重绘。激活节点被覆盖层遮住时 canvas 收不到 move，悬浮态保持不闪断
-    canvas.addEventListener("mousemove", (e) => {
-      const next = this.hoverToggleTargets(this.toWorld(e));
-      const cur = this.hoverToggles;
-      const same =
-        next.size === cur.size && [...next].every((n) => cur.has(n));
-      if (!same) {
-        this.hoverToggles = next;
-        this.app.requestRender();
-      }
-    });
-    canvas.addEventListener("mouseleave", () => {
-      if (this.hoverToggles.size) {
-        this.hoverToggles.clear();
-        this.app.requestRender();
-      }
-    });
-    window.addEventListener("mousemove", (e) => {
-      const drag = this.dragState;
-      if (drag) {
+    // 统一指针监听：绑定/撤销与屏幕→世界坐标换算由指针能力承担（机制层），
+    // 本场景只声明各事件的交互策略
+    const pointer = this.app.require(POINTER_CAPABILITY);
+    pointer.bind(this.app.canvas, {
+      onDown: (e, w) => {
+        if (e.button !== 0) return;
+        // 折叠开关命中优先于节点拖拽/框选
+        const toggle = this.hitCollapseToggle(w);
+        if (toggle) {
+          void this.toggleCollapse(toggle);
+          return;
+        }
+        const hit = this.hitText(w);
+        // 命中已选中节点：进入拖拽（根节点不可拖动，剔除后为空则退回框选）
+        if (this.tryStartDrag(e, hit)) return;
+        // 未建立拖拽上下文但命中已选中节点（如根节点）：记录按下位置供 mouseup 判定点击进入编辑
+        if (hit && this.sel.has(hit)) {
+          this.overlayDown = { x: e.clientX, y: e.clientY };
+        }
+        // 根节点不可拖拽：按下改为经视口能力平移画布，不进入框选
+        if (hit === this.root) {
+          this.pan?.beginPan(e);
+          return;
+        }
+        // 空白按下：框选会话由选中插件接管（橡皮筋 + 松手落定多选）
+        this.sel.beginMarquee(e);
+      },
+      // 悬浮驱动展开态开关显隐：压在连线覆盖矩形（或其开关圆）内显示 −，离开即隐藏；
+      // 集合变化才重绘。激活节点被覆盖层遮住时 canvas 收不到 move，悬浮态保持不闪断
+      onCanvasMove: (_e, w) => {
+        const next = this.hoverToggleTargets(w);
+        const cur = this.hoverToggles;
+        const same =
+          next.size === cur.size && [...next].every((n) => cur.has(n));
+        if (!same) {
+          this.hoverToggles = next;
+          this.app.requestRender();
+        }
+      },
+      onCanvasLeave: () => {
+        if (this.hoverToggles.size) {
+          this.hoverToggles.clear();
+          this.app.requestRender();
+        }
+      },
+      onWindowMove: (e) => {
+        const drag = this.dragState;
+        if (!drag) return;
         // 位移超过阈值才算拖拽，普通点击不触发
         if (
           !this.dragMoved &&
@@ -747,32 +740,34 @@ export class MindMap {
         // （虚影/落点计算在 updateDrag，与边缘自动平移共用）
         drag.lastScreen = { clientX: e.clientX, clientY: e.clientY };
         this.updateDrag(e);
-      }
-    });
-    window.addEventListener("mouseup", (e) => {
-      const drag = this.dragState;
-      if (drag) {
-        this.dragState = null;
-        // 未超阈值的普通点击：按在唯一激活节点上时进入编辑，其余交给 click 激活流程
-        if (!this.dragMoved) {
-          this.dragMoved = false;
-          if (this.pressOnActive) {
-            this.pressOnActive = false;
-            this.wake(true, { x: e.clientX, y: e.clientY });
+      },
+      onWindowUp: (e) => {
+        const drag = this.dragState;
+        if (drag) {
+          this.dragState = null;
+          // 未超阈值的普通点击：按在唯一激活节点上时进入编辑，其余交给 click 激活流程
+          if (!this.dragMoved) {
+            this.dragMoved = false;
+            if (this.pressOnActive) {
+              this.pressOnActive = false;
+              this.wake(true, { x: e.clientX, y: e.clientY });
+            }
+            return;
           }
+          this.dragMoved = false;
+          this.pressOnActive = false;
+          void this.commitDrop(drag.nodes, this.ghost.target);
           return;
         }
-        this.dragMoved = false;
-        this.pressOnActive = false;
-        void this.commitDrop(drag.nodes, this.ghost.target);
-        return;
-      }
-      // 按下未建立拖拽上下文的已选中节点（如根节点）：无位移视为点击进入编辑
-      const down = this.overlayDown;
-      this.overlayDown = null;
-      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3) {
-        this.wake(true, { x: e.clientX, y: e.clientY });
-      }
+        // 按下未建立拖拽上下文的已选中节点（如根节点）：无位移视为点击进入编辑
+        const down = this.overlayDown;
+        this.overlayDown = null;
+        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 3) {
+          this.wake(true, { x: e.clientX, y: e.clientY });
+        }
+      },
+      // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
+      onKeydown: (e) => this.onGlobalKeydown(e),
     });
   }
 
@@ -1337,7 +1332,7 @@ export class MindMap {
         return;
       }
       // 覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
-      if (!this.tryStartDrag(e, this.hitText(this.toWorld(e)))) {
+      if (!this.tryStartDrag(e, this.hitText(this.app.renderer.toWorld(e.clientX, e.clientY)))) {
         this.overlayDown = { x: e.clientX, y: e.clientY };
       }
     });
