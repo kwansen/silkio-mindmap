@@ -1,7 +1,8 @@
 // MindTree 模型回归测试：序列化、级数、样式解析与折叠可见性联动。
 // Text 构造函数依赖 DOM（document/canvas 测量），node 环境下用最小 stub：
-// Object.create(Text.prototype) 绕过构造器，手动铺 text/collapsed/children/parent 字段
-// （text setter 内的 measure 由 measureCtx 缺失自动跳过，不会触碰 DOM）。
+// Object.create(Text.prototype) 绕过构造器，手动铺 text/collapsed 字段并直写
+// 私有存储 _children/parent（children 为只读视图；text setter 内的 measure
+// 由 measureCtx 缺失自动跳过，不会触碰 DOM）。
 import { describe, expect, it } from "vitest";
 import { Text } from "@silker/core";
 import type { Node } from "@silker/core";
@@ -14,7 +15,6 @@ type FT = Text & {
   text: string;
   collapsed: boolean;
   visible: boolean;
-  children: Node[];
   parent: Node | null;
 };
 
@@ -23,7 +23,7 @@ const f = (text: string, children: FT[] = [], collapsed = false): FT => {
   n.text = text;
   n.collapsed = collapsed;
   n.visible = true;
-  n.children = children;
+  (n as unknown as { _children: Node[] })._children = children;
   n.parent = null;
   children.forEach((c) => (c.parent = n));
   return n;

@@ -9,7 +9,6 @@ import type { KeyboardNavDeps } from "../src/keyboard";
 
 type FT = Text & {
   visible: boolean;
-  children: FT[];
   parent: FT | null;
   width: number;
   height: number;
@@ -19,7 +18,7 @@ type FT = Text & {
 const f = (x: number, y: number, width = 100, height = 40): FT => {
   const n = Object.create(Text.prototype) as FT;
   n.visible = true;
-  n.children = [];
+  (n as unknown as { _children: FT[] })._children = [];
   n.parent = null;
   n.width = width;
   n.height = height;

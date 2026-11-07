@@ -13,7 +13,6 @@ type FT = Text & {
   width: number;
   height: number;
   visible: boolean;
-  children: Node[];
   getWorldPoint: () => { x: number; y: number };
 };
 
@@ -30,7 +29,7 @@ const f = (
   n.width = width;
   n.height = height;
   n.visible = opts.visible ?? true;
-  n.children = opts.children ?? [];
+  (n as unknown as { _children: Node[] })._children = opts.children ?? [];
   n.getWorldPoint = () => ({ x, y });
   return n;
 };

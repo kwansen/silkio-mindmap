@@ -53,19 +53,17 @@ export class NodeOperations {
     const node = this.deps.model.createNode(text, style);
     this.deps.model.nodeStyles.set(node, style);
     const edge = this.deps.model.createEdge(parent, node);
-    // 新增节点命令：redo/undo 对称地增删子节点与连线
+    // 新增节点命令：redo/undo 对称地增删子节点与连线（结构重放走静默原语，
+    // 不产生中间事件，变更由命令后的 emitChange 统一补发）
     const cmd: HistoryCommand = {
       type: "add",
       redo: () => {
-        parent.children.splice(index, 0, node);
-        node.parent = parent;
+        parent.attachChild(node, index);
         this.deps.app.add(edge);
         this.deps.model.edges.push(edge);
       },
       undo: () => {
-        const i = parent.children.indexOf(node);
-        if (i !== -1) parent.children.splice(i, 1);
-        node.parent = null;
+        parent.detachChild(node);
         this.deps.model.edges = this.deps.model.edges.filter((edge2) => edge2 !== edge);
         this.deps.app.remove(edge);
       },
@@ -113,8 +111,7 @@ export class NodeOperations {
         // 逆序插回：同父多目标按索引从大到小还原，前序插入不影响后序索引
         for (let i = captures.length - 1; i >= 0; i--) {
           const { node, parent, index } = captures[i];
-          parent.children.splice(index, 0, node);
-          node.parent = parent;
+          parent.attachChild(node, index);
         }
         dead.forEach((e) => {
           this.deps.model.edges.push(e);
@@ -175,13 +172,12 @@ export class NodeOperations {
       const edge = this.deps.model.createEdge(parent, node);
       return { parent, node, edge, inner, index: index + i };
     });
-    // 粘贴命令：redo/undo 对称地增删子树节点、父子连线与子树内部连线
+    // 粘贴命令：redo/undo 对称地增删子树节点、父子连线与子树内部连线（结构重放走静默原语）
     const cmd: HistoryCommand = {
       type: "add",
       redo: () => {
         inserts.forEach(({ parent: p, node, edge, inner, index: idx }) => {
-          p.children.splice(idx, 0, node);
-          node.parent = p;
+          p.attachChild(node, idx);
           this.deps.app.add(edge);
           this.deps.app.add(inner);
           this.deps.model.edges.push(edge, ...inner);
@@ -191,9 +187,7 @@ export class NodeOperations {
         // 逆序摘除：前序摘除不影响后序兄弟索引
         for (let i = inserts.length - 1; i >= 0; i--) {
           const { parent: p, node, edge, inner } = inserts[i];
-          const ci = p.children.indexOf(node);
-          if (ci !== -1) p.children.splice(ci, 1);
-          node.parent = null;
+          p.detachChild(node);
           const removed = [edge, ...inner];
           this.deps.model.edges = this.deps.model.edges.filter((e) => !removed.includes(e));
           removed.forEach((e2) => this.deps.app.remove(e2));

@@ -22,7 +22,7 @@ describe("layout 树形布局", () => {
   it("单子节点：水平偏移 levelGap、相对父节点垂直居中", () => {
     const root = n(100, 60);
     const child = n(80, 20);
-    root.children.push(child);
+    root.add(child);
     layout(root, OPTS);
     expect(child.x).toBe(100 + 60); // parent.width + levelGap
     expect(child.y).toBe(20); // (60 - 20) / 2
@@ -32,7 +32,8 @@ describe("layout 树形布局", () => {
     const root = n(100, 60);
     const c1 = n(80, 20);
     const c2 = n(80, 20);
-    root.children.push(c1, c2);
+    root.add(c1);
+    root.add(c2);
     layout(root, OPTS);
     // 块高 20+10+20=50，整体居中偏移 (60-50)/2=5
     expect(c1.y).toBe(5);
@@ -47,8 +48,10 @@ describe("layout 树形布局", () => {
     const c2 = n(80, 20);
     const g1 = n(60, 20);
     const g2 = n(60, 20);
-    c1.children.push(g1, g2);
-    root.children.push(c1, c2);
+    c1.add(g1);
+    c1.add(g2);
+    root.add(c1);
+    root.add(c2);
     layout(root, OPTS);
     // c1 的内容跨度 50（孙子块），c2 紧随其后 gap=10
     // 孙子 y 相对 c1：块高 50 居中于 c1（h=20）→ shift=-15
@@ -63,7 +66,7 @@ describe("layout 树形布局", () => {
   it("direction 'left'：子节点镜像到父节点左侧", () => {
     const root = n(100, 60);
     const child = n(80, 20);
-    root.children.push(child);
+    root.add(child);
     layout(root, { ...OPTS, direction: "left" });
     expect(child.x).toBe(-(80 + 60)); // -(child.width + levelGap)
   });
@@ -72,7 +75,7 @@ describe("layout 树形布局", () => {
     const root = n(100, 60);
     root.collapsed = true;
     const child = n(80, 20);
-    root.children.push(child);
+    root.add(child);
     layout(root, OPTS);
     expect(child.x).toBe(0);
     expect(child.y).toBe(0);
@@ -82,7 +85,7 @@ describe("layout 树形布局", () => {
     const root = n(100, 60);
     const c1 = n(80, 20);
     c1.visible = false;
-    root.children.push(c1);
+    root.add(c1);
     layout(root, OPTS);
     expect(c1.x).toBe(160); // 照常分配位置
   });

@@ -438,8 +438,7 @@ export class DragInteractions {
         redo: () => {
           for (const m of moves) {
             m.oldParent.remove(m.node);
-            parent.children.splice(m.newIndex, 0, m.node);
-            m.node.parent = parent;
+            parent.attachChild(m.node, m.newIndex);
             // 换线：移除旧父连线，加入新父连线
             this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.oldEdge);
             this.deps.app.remove(m.oldEdge);
@@ -452,8 +451,7 @@ export class DragInteractions {
         undo: () => {
           for (const m of [...moves].reverse()) {
             parent.remove(m.node);
-            m.oldParent.children.splice(m.oldIndex, 0, m.node);
-            m.node.parent = m.oldParent;
+            m.oldParent.attachChild(m.node, m.oldIndex);
             // 换线反向：移除新父连线，还原旧父连线
             this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.newEdge);
             this.deps.app.remove(m.newEdge);
