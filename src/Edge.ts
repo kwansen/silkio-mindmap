@@ -63,3 +63,6 @@ export class MindPathEdge extends BaseEdge {
     super.render(ctx)
   }
 }
+
+// 思维导图连线类型：贝塞尔单段（MindMapEdge）或直线引出接入（MindPathEdge，path / zBezier）
+export type MindEdge = MindMapEdge | MindPathEdge

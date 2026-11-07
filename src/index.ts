@@ -6,7 +6,7 @@ export type {
   MindMapOptions,
   LayoutDirection,
   MindMapChangeType,
-} from "./mindmap"
+} from "./types"
 // 自动布局：契约 + 官方树形布局插件（第三方布局插件按能力键同名覆盖）
 export { BuiltinTreeLayout } from "./layout"
 export { AUTO_LAYOUT_CAPABILITY } from "./auto-layout"
