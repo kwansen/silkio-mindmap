@@ -67,8 +67,7 @@ export class NodeOperations {
         if (i !== -1) parent.children.splice(i, 1);
         node.parent = null;
         this.deps.model.edges = this.deps.model.edges.filter((edge2) => edge2 !== edge);
-        const ci = this.deps.app.children.indexOf(edge);
-        if (ci !== -1) this.deps.app.children.splice(ci, 1);
+        this.deps.app.remove(edge);
       },
     };
     this.deps.history.exec(cmd);
@@ -108,10 +107,7 @@ export class NodeOperations {
       redo: () => {
         captures.forEach(({ node, parent }) => parent.remove(node));
         this.deps.model.edges = this.deps.model.edges.filter((e) => !dead.includes(e));
-        dead.forEach((e) => {
-          const i = this.deps.app.children.indexOf(e);
-          if (i !== -1) this.deps.app.children.splice(i, 1);
-        });
+        dead.forEach((e) => this.deps.app.remove(e));
       },
       undo: () => {
         // 逆序插回：同父多目标按索引从大到小还原，前序插入不影响后序索引
@@ -200,10 +196,7 @@ export class NodeOperations {
           node.parent = null;
           const removed = [edge, ...inner];
           this.deps.model.edges = this.deps.model.edges.filter((e) => !removed.includes(e));
-          removed.forEach((e2) => {
-            const ai = this.deps.app.children.indexOf(e2);
-            if (ai !== -1) this.deps.app.children.splice(ai, 1);
-          });
+          removed.forEach((e2) => this.deps.app.remove(e2));
         }
       },
     };

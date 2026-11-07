@@ -435,8 +435,7 @@ export class DragInteractions {
             m.node.parent = parent;
             // 换线：移除旧父连线，加入新父连线
             this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.oldEdge);
-            const i = this.deps.app.children.indexOf(m.oldEdge);
-            if (i !== -1) this.deps.app.children.splice(i, 1);
+            this.deps.app.remove(m.oldEdge);
             this.deps.model.edges.push(m.newEdge);
             this.deps.app.add(m.newEdge);
             if (this.deps.model.levelStyles.length)
@@ -450,8 +449,7 @@ export class DragInteractions {
             m.node.parent = m.oldParent;
             // 换线反向：移除新父连线，还原旧父连线
             this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.newEdge);
-            const i = this.deps.app.children.indexOf(m.newEdge);
-            if (i !== -1) this.deps.app.children.splice(i, 1);
+            this.deps.app.remove(m.newEdge);
             this.deps.model.edges.push(m.oldEdge);
             this.deps.app.add(m.oldEdge);
             this.deps.model.applyNodeStyle(m.node, m.oldStyle);

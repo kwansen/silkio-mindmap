@@ -14,7 +14,7 @@ export const DROP_RANGE = 500;
 // 悬浮在目标纵向范围之外（如一级节点下方的空白区）也能命中它；贴着某个后代悬浮时
 // 后代水平间距更小仍优先，故深处节点不会被祖先抢走
 export function dropTarget(
-  children: Node[],
+  children: readonly Node[],
   floatBox: { x: number; y: number; w: number; h: number } | null,
   subtree: Set<Node>,
   direction: LayoutDirection,

@@ -321,9 +321,7 @@ export class MindMap {
   // （框选橡皮筋由选中插件在会话内挂载，不在常驻覆盖层之列）
   private raiseOverlays() {
     for (const n of [this.highlight, this.ghost, this.collapseToggle]) {
-      const i = this.app.children.indexOf(n);
-      if (i !== -1) this.app.children.splice(i, 1);
-      this.app.add(n);
+      this.app.reorder(n, this.app.children.length);
     }
   }
 
