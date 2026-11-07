@@ -60,6 +60,10 @@ export class DragInteractions {
   dragChip: Text | null = null;
   // 拖拽中原位节点文字的原始颜色（拖拽期间转暗色，结束后恢复）
   dragFills = new Map<Text, string>();
+  // 悬浮命中合并到帧：hoverTargets 是 O(n) 树遍历（每节点 getWorldPoint 矩阵链），
+  // 真实鼠标 move 可达 125Hz+，逐事件执行会打满主线程饿死 rAF（拖拽冻结、松手瞬移）
+  private hoverFrame = 0;
+  private pendingHover: { x: number; y: number } | null = null;
 
   constructor(private deps: DragDeps) {}
 
@@ -71,7 +75,7 @@ export class DragInteractions {
     // 统一指针监听：绑定/撤销与屏幕→世界坐标换算由指针能力承担（机制层），
     // 本场景只声明各事件的交互策略；返回撤销函数由门面并入 cleanups 统一管理
     const pointer = this.deps.app.require(POINTER_CAPABILITY);
-    return pointer.bind(this.deps.app.canvas, {
+    const unbind = pointer.bind(this.deps.app.canvas, {
       onDown: (e, w) => {
         if (e.button !== 0) return;
         // 折叠开关命中优先于节点拖拽/框选
@@ -96,7 +100,15 @@ export class DragInteractions {
         this.deps.sel.beginMarquee(e);
       },
       // 悬浮驱动展开态开关显隐（状态属主为折叠控制器）
-      onCanvasMove: (_e, w) => this.deps.collapse.onMove(w),
+      onCanvasMove: (_e, w) => {
+        // 合并到每帧最多一次悬浮命中检测，事件只记录最新位置
+        this.pendingHover = w;
+        if (this.hoverFrame) return;
+        this.hoverFrame = requestAnimationFrame(() => {
+          this.hoverFrame = 0;
+          if (this.pendingHover) this.deps.collapse.onMove(this.pendingHover);
+        });
+      },
       onCanvasLeave: () => this.deps.collapse.onLeave(),
       onWindowMove: (e) => {
         const drag = this.dragState;
@@ -170,6 +182,15 @@ export class DragInteractions {
       // 激活态键盘导航：方向键切换节点、Tab/Enter 新建、打字进入编辑（编辑态由编辑框自身处理按键）
       onKeydown: (e) => this.deps.keyboard.onGlobalKeydown(e),
     });
+    // 卸载时取消挂起的悬浮检测帧，避免解绑后仍回调 collapse.onMove
+    return () => {
+      if (this.hoverFrame) {
+        cancelAnimationFrame(this.hoverFrame);
+        this.hoverFrame = 0;
+      }
+      this.pendingHover = null;
+      unbind();
+    };
   }
   // 覆盖层左键按下：与画布按下共用拖拽上下文（覆盖层恰好盖住激活节点，命中即它本身），
   // 根节点不可拖时仅记录按下位置供 mouseup 判定点击
