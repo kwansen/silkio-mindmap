@@ -9,8 +9,8 @@ import type { ExportOptions } from "@silker/plugin-exporter";
 import { Selection, selectionCapabilityKey } from "@silker/plugin-selection";
 import type { SelectionCapability } from "@silker/plugin-selection";
 import { layout } from "./layout";
-import { History } from "./history";
-import type { Command } from "./history";
+import { History, HISTORY_CAPABILITY } from "@silker/plugin-history";
+import type { HistoryCommand, HistoryCapability } from "@silker/plugin-history";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { EdgeShape } from "@silker/plugin-edge";
 
@@ -149,8 +149,9 @@ export class MindMap {
   private onChange?: (type: MindMapChangeType) => void;
   // 连线样式（构造时从 options 记录）
   private edgeStyle: EdgeShape;
-  // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放
-  private history = new History();
+  // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放。
+  // 实现在 @silker/plugin-history，构造器内安装插件后按能力键消费
+  private history!: HistoryCapability;
   // 编辑会话起点快照（仅节点引用与原文字符串，非整树快照）：onEditStart 记录，
   // onEditEnd 对比决定是否把文本变更记入历史
   private editingOld: { node: Text | null; text: string } = {
@@ -186,7 +187,7 @@ export class MindMap {
     this.deactivate();
     await this.relayout();
     // 直接调用字段而非 emitChange：undo/redo 不产生新变更，仅通知宿主数据已回退
-    this.onChange?.(cmd.type);
+    this.onChange?.(cmd.type as MindMapChangeType);
   }
 
   // 重做：流程与 undo 对称，方向相反
@@ -196,7 +197,7 @@ export class MindMap {
     if (!cmd) return;
     this.deactivate();
     await this.relayout();
-    this.onChange?.(cmd.type);
+    this.onChange?.(cmd.type as MindMapChangeType);
   }
 
   get canUndo(): boolean {
@@ -241,6 +242,10 @@ export class MindMap {
     this.levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
     this.app = new App(options.canvas);
+    // 安装历史记录插件：命令模式 undo/redo 双栈（默认容量 100），install 时自注册
+    // 历史能力，各变更入口按能力键消费（只认能力名与契约，不认插件实例）
+    this.app.use(new History());
+    this.history = this.app.require(HISTORY_CAPABILITY);
     // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口；
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
     this.app.use(new Viewport());
@@ -912,7 +917,7 @@ export class MindMap {
         });
       }
       // 移动命令：多选目标合并为一条，undo 一次全回退（逆序插回，防同父索引失效）
-      const cmd: Command = {
+      const cmd: HistoryCommand = {
         type: "move",
         redo: () => {
           for (const m of moves) {
@@ -1339,7 +1344,7 @@ export class MindMap {
     this.nodeStyles.set(node, style);
     const edge = this.createEdge(parent, node);
     // 新增节点命令：redo/undo 对称地增删子节点与连线
-    const cmd: Command = {
+    const cmd: HistoryCommand = {
       type: "add",
       redo: () => {
         parent.children.splice(index, 0, node);
@@ -1387,7 +1392,7 @@ export class MindMap {
       (e) => subtree.has(e.fromNode) || subtree.has(e.toNode),
     );
     // 删除命令：多选目标合并为一条，undo 一次全回退
-    const cmd: Command = {
+    const cmd: HistoryCommand = {
       type: "delete",
       redo: () => {
         captures.forEach(({ node, parent }) => parent.remove(node));
@@ -1464,7 +1469,7 @@ export class MindMap {
       return { parent, node, edge, inner, index: index + i };
     });
     // 粘贴命令：redo/undo 对称地增删子树节点、父子连线与子树内部连线
-    const cmd: Command = {
+    const cmd: HistoryCommand = {
       type: "add",
       redo: () => {
         inserts.forEach(({ parent: p, node, edge, inner, index: idx }) => {
