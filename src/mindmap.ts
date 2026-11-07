@@ -10,6 +10,8 @@ import { Selection, selectionCapabilityKey } from "@silker/plugin-selection";
 import type { SelectionCapability } from "@silker/plugin-selection";
 import { layout } from "./layout";
 import { History, HISTORY_CAPABILITY } from "@silker/plugin-history";
+import { Command, COMMAND_CAPABILITY } from "@silker/plugin-command";
+import type { CommandCapability } from "@silker/plugin-command";
 import type { HistoryCommand, HistoryCapability } from "@silker/plugin-history";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { EdgeShape } from "@silker/plugin-edge";
@@ -152,6 +154,8 @@ export class MindMap {
   // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放。
   // 实现在 @silker/plugin-history，构造器内安装插件后按能力键消费
   private history!: HistoryCapability;
+  // 命令与键位能力：动作注册为命令、按键统一分发（撤销/复制/粘贴/删除等默认键位见构造器）
+  private commands!: CommandCapability;
   // 编辑会话起点快照（仅节点引用与原文字符串，非整树快照）：onEditStart 记录，
   // onEditEnd 对比决定是否把文本变更记入历史
   private editingOld: { node: Text | null; text: string } = {
@@ -246,6 +250,44 @@ export class MindMap {
     // 历史能力，各变更入口按能力键消费（只认能力名与契约，不认插件实例）
     this.app.use(new History());
     this.history = this.app.require(HISTORY_CAPABILITY);
+    // 安装命令与键位插件：撤销/重做/复制/粘贴/删除注册为命令并绑定默认键位，
+    // document keydown 由插件统一分发；应用层与第三方可按能力键复用命令或重绑键位。
+    // install 时自注册命令能力，此后仅按能力键消费
+    this.app.use(new Command());
+    this.commands = this.app.require(COMMAND_CAPABILITY);
+    this.commands.guard = (e) => this.keymapGuard(e);
+    this.commands.register({
+      id: "mindmap.undo",
+      title: "撤销",
+      run: () => this.undo(),
+    });
+    this.commands.register({
+      id: "mindmap.redo",
+      title: "重做",
+      run: () => this.redo(),
+    });
+    this.commands.register({
+      id: "mindmap.copy",
+      title: "复制选中",
+      run: () => this.copySelection(),
+    });
+    this.commands.register({
+      id: "mindmap.paste",
+      title: "粘贴",
+      run: () => this.pasteClipboard(),
+    });
+    this.commands.register({
+      id: "mindmap.delete",
+      title: "删除选中",
+      run: () => this.deleteSelection(),
+    });
+    this.commands.bind("mod+z", "mindmap.undo");
+    this.commands.bind("mod+shift+z", "mindmap.redo");
+    this.commands.bind("mod+y", "mindmap.redo");
+    this.commands.bind("mod+c", "mindmap.copy");
+    this.commands.bind("mod+v", "mindmap.paste");
+    this.commands.bind("delete", "mindmap.delete");
+    this.commands.bind("backspace", "mindmap.delete");
     // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口；
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
     this.app.use(new Viewport());
@@ -1026,63 +1068,15 @@ export class MindMap {
   // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   private onGlobalKeydown = (e: KeyboardEvent) => {
-    // 覆盖层持焦时普通按键由其 keydown 处理器接管；修饰键组合（Ctrl/Cmd/Alt，
-    // 复制/粘贴/撤销等）仍走全局处理——否则激活态覆盖层会把 Ctrl+C 的 "c" 当可打印
-    // 字符唤醒编辑态。编辑态下撤销/复制交给输入框原生行为，组合键一律不拦
-    if (
-      this.editor.hasFocus() &&
-      (this.editing || !(e.ctrlKey || e.metaKey || e.altKey))
-    ) {
-      return;
-    }
-    // 仅响应画布、页面空白处的按键（覆盖层持焦放行的修饰键组合除外），页面其它控件输入不受影响
-    const target = e.target as HTMLElement;
-    if (
-      !this.editor.hasFocus() &&
-      target !== document.body &&
-      target !== this.app.canvas
-    ) {
-      return;
-    }
-    // 撤销/重做快捷键：仅非编辑态响应（编辑态内撤销由输入框原生行为处理）；
-    // 需在下方修饰键直接放行之前判定。Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做
-    if (!this.editing && (e.ctrlKey || e.metaKey)) {
-      const key = e.key.toLowerCase();
-      if (key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) void this.redo();
-        else void this.undo();
-        return;
-      }
-      if (key === "y") {
-        e.preventDefault();
-        void this.redo();
-        return;
-      }
-      // Ctrl/Cmd+C 复制选中节点（多选可整组复制），Ctrl/Cmd+V 粘贴（仅单选激活时生效）；
-      // 编辑态不拦截，覆盖层内粘贴走原生文本粘贴
-      if (key === "c") {
-        e.preventDefault();
-        this.copySelection();
-        return;
-      }
-      if (key === "v") {
-        e.preventDefault();
-        void this.pasteClipboard();
-        return;
-      }
-    }
+    // 撤销/重做/复制/粘贴/删除已注册为命令并绑定键位（构造器），由命令插件统一分发；
+    // 此处只处理领域语义按键（Tab/Enter 新建、方向键导航、打字唤醒编辑态）
+    if (!this.keymapGuard(e)) return;
     if (e.key === "Tab" || e.key === "Enter") {
       e.preventDefault();
       if (this.active) void this.createRelated(e, this.active);
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === "Delete" || e.key === "Backspace") {
-      e.preventDefault();
-      void this.deleteSelection();
-      return;
-    }
     if (e.key.startsWith("Arrow")) {
       e.preventDefault();
       this.navigate(e.key);
@@ -1096,6 +1090,25 @@ export class MindMap {
       this.wake();
     }
   };
+
+  // 键位分发守卫：onGlobalKeydown 与命令插件共用。覆盖层持焦时普通按键由其 keydown
+  // 处理器接管；修饰键组合（Ctrl/Cmd/Alt）仍走全局分发——否则激活态覆盖层会把
+  // Ctrl+C 的 "c" 当可打印字符唤醒编辑态。编辑态下撤销/复制交给输入框原生行为，
+  // 组合键一律不拦。仅响应画布、页面空白处与覆盖层（未编辑时）的按键，页面其它控件输入不受影响
+  private keymapGuard(e: KeyboardEvent): boolean {
+    if (
+      this.editor.hasFocus() &&
+      (this.editing || !(e.ctrlKey || e.metaKey || e.altKey))
+    ) {
+      return false;
+    }
+    const target = e.target as HTMLElement;
+    return (
+      this.editor.hasFocus() ||
+      target === document.body ||
+      target === this.app.canvas
+    );
+  }
 
   // 方向键导航：上下在整棵树内按视觉位置选垂直方向最近的节点（可跨分支），左右按布局方向进入首子节点或回父节点
   // 多选时以选集左上角节点为锚点，先收敛为单选再导航（Tab/Enter 在多选下不生效，见 onGlobalKeydown）

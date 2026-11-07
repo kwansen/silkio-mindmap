@@ -21,6 +21,7 @@
     "@silker/plugin-exporter": "workspace:*",
     "@silker/plugin-selection": "workspace:*",
     "@silker/plugin-history": "workspace:*",
+    "@silker/plugin-command": "workspace:*",
     "@silker/core-viewport": "workspace:*"
   },
   "devDependencies": {
