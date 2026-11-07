@@ -253,7 +253,8 @@ export class DragInteractions {
       this.deps.direction,
     );
     this.deps.ghost.target = t;
-    this.deps.app.requestRender();
+    // 拖拽反馈（虚影/落点连线）均为覆盖层：轻量路径，不重光栅化场景
+    this.deps.app.requestOverlayRender();
   }
 
   // 边缘自动平移：拖拽中鼠标贴近画布边缘时持续平移视口（越近越快），松手即停。

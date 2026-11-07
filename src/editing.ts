@@ -70,7 +70,7 @@ export class ActivationController {
     this.deps.sel.clear();
     this.deps.highlight.targets = [];
     this.deps.editor.stop();
-    this.deps.app.requestRender();
+    this.deps.app.requestOverlayRender();
   }
 
   // 批量设置选中（单选/多选统一入口）：
@@ -90,7 +90,8 @@ export class ActivationController {
       // 多选态没有编辑框，退出可能残留的单选覆盖层
       this.deps.editor.stop();
     }
-    this.deps.app.requestRender();
+    // 激活只改覆盖层视觉（高亮环 + 编辑覆盖层显隐）：轻量路径，不重光栅化场景
+    this.deps.app.requestOverlayRender();
   }
 
   // 编辑会话开始（TextEditor onEditStart 回调入口）
@@ -150,7 +151,7 @@ export class ActivationController {
   // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
   private setHighlightEditing(editing: boolean) {
     this.deps.highlight.color = editing ? EDITING_COLOR : ACTIVE_COLOR;
-    this.deps.app.requestRender();
+    this.deps.app.requestOverlayRender();
   }
 
   // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
@@ -175,7 +176,8 @@ export class ActivationController {
           : 0;
     if (dx === 0 && dy === 0) return;
     this.deps.app.camera.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy });
-    this.deps.app.requestRender();
+    // 相机-only 变更：轻量路径（blit 快照 + 重画覆盖层）
+    this.deps.app.requestCameraRender();
   }
 
   // 编辑框按键两态机（飞书模型）——以 this.editing 为唯一状态来源（覆盖层常驻，blur/唤醒随时切换显隐）：

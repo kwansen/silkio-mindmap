@@ -187,7 +187,7 @@ export class MindMap {
       direction: this.direction,
       sel: this.sel,
       isBusy: () => this.drag.dragState !== null || this.sel.marqueeActive,
-      requestRender: () => this.app.requestRender(),
+      requestRender: () => this.app.requestOverlayRender(),
       onRelayout: () => this.relayout(),
       onDeactivate: () => this.activation.deactivate(),
       emitChange: (type) => this.emitChange(type),
