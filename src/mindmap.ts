@@ -14,6 +14,7 @@ import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
 import { Command, COMMAND_CAPABILITY } from "@silker/plugin-command";
 import { Pointer, POINTER_CAPABILITY } from "@silker/plugin-interaction";
+import { Clicker, CANVAS_CLICK_CAPABILITY } from "@silker/plugin-interaction";
 import type { CommandCapability } from "@silker/plugin-command";
 import type { HistoryCommand, HistoryCapability } from "@silker/plugin-history";
 import { MindMapEdge, MindPathEdge } from "./Edge";
@@ -303,6 +304,8 @@ export class MindMap {
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
     // 安装指针交互插件：统一事件绑定/撤销与坐标换算（机制层），交互策略由本场景声明
     this.app.use(new Pointer());
+    // 安装点击分发插件：拖拽阈值判定、命中测试与节点/空白点击分发（机制层）
+    this.app.use(new Clicker());
     // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
     this.app.use(new Exporter());
     // 安装官方布局插件（树形布局自注册 mindmap.auto-layout 能力），再装配应用层传入的
@@ -376,8 +379,8 @@ export class MindMap {
     this.collapseToggle.items = () => this.collapseItems();
     // 左键框选与节点拖拽（含全局按键导航，统一由指针能力绑定）
     this.bindMarquee();
-    // 点击画布空白处取消激活态（拖拽平移不触发）
-    this.app.onBlankClick = () => this.deactivate();
+    // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
+    this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.deactivate());
     // 拖拽到画布边缘时自动平移视口（rAF 常驻循环，非拖拽时空转）
     requestAnimationFrame(this.edgePanLoop);
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
@@ -424,7 +427,7 @@ export class MindMap {
     const grabP = grabNode.getWorldPoint();
     this.dragState = {
       startScreen: { x: e.clientX, y: e.clientY },
-      startWorld: this.app.renderer.toWorld(e.clientX, e.clientY),
+      startWorld: this.app.camera.toWorld(e.clientX, e.clientY),
       nodes,
       origins: nodes.map((n) => ({ x: n.x, y: n.y })),
       grabNode,
@@ -445,7 +448,7 @@ export class MindMap {
     const drag = this.dragState;
     if (!drag) return;
     // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
-    const cur = this.app.renderer.toWorld(pos.clientX, pos.clientY);
+    const cur = this.app.camera.toWorld(pos.clientX, pos.clientY);
     const dx = cur.x - drag.startWorld.x;
     const dy = cur.y - drag.startWorld.y;
     this.ghost.floatBox = {
@@ -487,8 +490,8 @@ export class MindMap {
       const vx = axis(x - rect.left, rect.right - x);
       const vy = axis(y - rect.top, rect.bottom - y);
       if (vx || vy) {
-        const vp = this.app.renderer.viewport;
-        this.app.renderer.setViewport({ ...vp, x: vp.x + vx, y: vp.y + vy });
+        const vp = this.app.camera.viewport;
+        this.app.camera.setViewport({ ...vp, x: vp.x + vx, y: vp.y + vy });
         this.updateDrag(drag.lastScreen);
       }
     }
@@ -1050,7 +1053,7 @@ export class MindMap {
 
   // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
   private scrollNodeIntoView(text: Text) {
-    const vp = this.app.renderer.viewport;
+    const vp = this.app.camera.viewport;
     const p = text.getWorldPoint();
     const sx = p.x * vp.scale + vp.x;
     const sy = p.y * vp.scale + vp.y;
@@ -1069,7 +1072,7 @@ export class MindMap {
           ? window.innerHeight - 20 - bottom
           : 0;
     if (dx === 0 && dy === 0) return;
-    this.app.renderer.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy });
+    this.app.camera.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy });
     this.app.requestRender();
   }
 
@@ -1332,7 +1335,7 @@ export class MindMap {
         return;
       }
       // 覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
-      if (!this.tryStartDrag(e, this.hitText(this.app.renderer.toWorld(e.clientX, e.clientY)))) {
+      if (!this.tryStartDrag(e, this.hitText(this.app.camera.toWorld(e.clientX, e.clientY)))) {
         this.overlayDown = { x: e.clientX, y: e.clientY };
       }
     });
