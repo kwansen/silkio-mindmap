@@ -1,43 +1,12 @@
-import type { Node } from "@silker/core"
+import type { App, Node, Plugin } from "@silker/core"
+import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout"
+import type { AutoLayoutCapability, AutoLayoutOptions } from "./auto-layout"
 
-// 思维导图布局参数：hGap 为父子水平间距，vGap 为兄弟垂直间距
-export interface LayoutOptions {
-  direction: 'left' | 'right'
-  levelGap: number
-  siblingGap: number
-}
-
-// export function layout<T extends Node>(
-//   root: T,
-//   options: LayoutOptions
-// ): T {
-//   function visit(node: Node): number {
-//     if (node.children.length === 0) {
-//       return node.height
-//     }
-
-//     let y = 0
-
-//     for (const child of node.children) {
-//       child.x = node.width + options.levelGap
-//       child.y = y
-
-//       const childHeight = visit(child)
-
-//       y += childHeight + options.siblingGap
-//     }
-
-//     return Math.max(node.height, y - options.siblingGap)
-//   }
-
-//   visit(root)
-
-//   return root
-// }
-
+// 思维导图树形布局（官方实现）：参数契约见 ./auto-layout（AutoLayoutOptions），
+// 实现直接采用能力契约类型，保证实现与契约天然一致
 export function layout<T extends Node>(
   root: T,
-  options: LayoutOptions
+  options: AutoLayoutOptions
 ): T {
   // 递归布局子树，返回子树内容相对节点顶部的纵向范围 [top, bottom]（top 可为负）
   function visit(node: Node): { top: number; bottom: number } {
@@ -78,4 +47,19 @@ export function layout<T extends Node>(
   visit(root)
 
   return root
+}
+
+// 官方布局插件：install 时自注册 mindmap.auto-layout 能力。第三方布局插件按能力键
+// 注册同名能力覆盖官方实现（App.provide 替换 + uninstall 恢复），不 import 本插件
+export class BuiltinTreeLayout implements Plugin {
+  install(app: App) {
+    const impl: AutoLayoutCapability = {
+      layout: (root, options: AutoLayoutOptions) => {
+        void layout(root, options)
+      },
+    }
+    app.provide(AUTO_LAYOUT_CAPABILITY, impl, {
+      provider: "mindmap.builtin-tree-layout",
+    })
+  }
 }

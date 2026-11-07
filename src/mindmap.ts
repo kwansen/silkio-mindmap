@@ -1,5 +1,5 @@
 import { App, Text } from "@silker/core";
-import type { Node } from "@silker/core";
+import type { Node, Plugin } from "@silker/core";
 import { Viewport, VIEWPORT_CAPABILITY } from "@silker/core-viewport";
 import type { ViewportCapability } from "@silker/core-viewport";
 import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
@@ -8,8 +8,10 @@ import { Exporter, EXPORT_CAPABILITY } from "@silker/plugin-exporter";
 import type { ExportOptions } from "@silker/plugin-exporter";
 import { Selection, selectionCapabilityKey } from "@silker/plugin-selection";
 import type { SelectionCapability } from "@silker/plugin-selection";
-import { layout } from "./layout";
 import { History, HISTORY_CAPABILITY } from "@silker/plugin-history";
+import { BuiltinTreeLayout } from "./layout";
+import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
+import type { AutoLayoutCapability } from "./auto-layout";
 import { Command, COMMAND_CAPABILITY } from "@silker/plugin-command";
 import type { CommandCapability } from "@silker/plugin-command";
 import type { HistoryCommand, HistoryCapability } from "@silker/plugin-history";
@@ -77,6 +79,9 @@ export interface MindMapOptions {
   // 连线样式：'bezier' 单段贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + Z 字折线接入，
   // 'zBezier' 父级水平直线引出 + 贝塞尔曲线接入
   edgeStyle?: EdgeShape;
+  // 额外装配的插件（在官方布局插件之后、初始数据 init 之前安装）：第三方布局插件
+  // 经此注册同名 mindmap.auto-layout 能力覆盖官方实现，初始布局即可生效
+  plugins?: Plugin[];
 }
 
 // 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换
@@ -154,6 +159,9 @@ export class MindMap {
   // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放。
   // 实现在 @silker/plugin-history，构造器内安装插件后按能力键消费
   private history!: HistoryCapability;
+  // 自动布局能力（BuiltinTreeLayout 插件 install 时注册，第三方布局插件可同名覆盖）：
+  // 各结构变更路径经 relayout 按能力键消费，注册表缺失属于装配错误（require 兜底）
+  private layout!: AutoLayoutCapability;
   // 命令与键位能力：动作注册为命令、按键统一分发（撤销/复制/粘贴/删除等默认键位见构造器）
   private commands!: CommandCapability;
   // 编辑会话起点快照（仅节点引用与原文字符串，非整树快照）：onEditStart 记录，
@@ -294,6 +302,11 @@ export class MindMap {
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
     // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
     this.app.use(new Exporter());
+    // 安装官方布局插件（树形布局自注册 mindmap.auto-layout 能力），再装配应用层传入的
+    // 第三方插件（可同名覆盖布局，初始数据 init 前生效）；此后仅按能力键消费布局能力
+    this.app.use(new BuiltinTreeLayout());
+    for (const p of options.plugins ?? []) this.app.use(p);
+    this.layout = this.app.require(AUTO_LAYOUT_CAPABILITY);
     // 安装文本编辑插件：输入时重新布局，编辑框就绪后直接监听按键新建节点（包装 add 自动绑定后续节点）；
     // install 时自注册文本编辑能力，此后仅按能力键消费
     this.app.use(
@@ -1213,7 +1226,7 @@ export class MindMap {
     this.root = root;
     // 数据可携带折叠态：布局前先按折叠标志联动可见性（布局器跳过折叠子树）
     this.applyCollapseVisibility();
-    await layout(root, {
+    await this.layout.layout(root, {
       direction: this.direction,
       levelGap: 80,
       siblingGap: 20,
@@ -1249,7 +1262,7 @@ export class MindMap {
     this.applyCollapseVisibility();
     // 新连线可能追加到了覆盖层之上，先归位再渲染
     this.raiseOverlays();
-    await layout(this.root, {
+    await this.layout.layout(this.root, {
       direction: this.direction,
       levelGap: 80,
       siblingGap: 20,
