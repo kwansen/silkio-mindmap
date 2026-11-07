@@ -1,5 +1,5 @@
 import { App, Text, VIEWPORT_CAPABILITY } from "@silker/core";
-import type { CommandCapability, ExportOptions, HistoryCapability } from "@silker/core";
+import type { CommandCapability, ExportOptions, HistoryCapability, Plugin } from "@silker/core";
 import type { SelectionCapability, TextEditorCapability, ViewportCapability } from "@silker/core";
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
@@ -65,6 +65,12 @@ export class MindMap {
   private keyboard: KeyboardNav;
   // 拖拽交互（拖拽换父/框选绑定/边缘自动平移）
   private drag: DragInteractions;
+  // 构造期安装的插件（官方树形布局 + 应用层第三方）：destroy 时对称卸载
+  private scenePlugins: Plugin[] = [];
+  // 交互监听清理函数（指针绑定等），destroy 时统一执行
+  private cleanups: Array<() => void> = [];
+  // 已拆卸标志：destroy 后 init 不再挂载节点（init 为异步，可能与 destroy 竞争）
+  private destroyed = false;
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? "left";
@@ -121,9 +127,10 @@ export class MindMap {
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
     // 安装官方布局插件（树形布局自注册 mindmap.auto-layout 能力），再装配应用层传入的
-    // 第三方插件（可同名覆盖布局，初始数据 init 前生效）；此后仅按能力键消费布局能力
-    this.app.use(new BuiltinTreeLayout());
-    for (const p of options.plugins ?? []) this.app.use(p);
+    // 第三方插件（可同名覆盖布局，初始数据 init 前生效）；此后仅按能力键消费布局能力。
+    // 安装清单留存，destroy 时对称卸载
+    this.scenePlugins = [new BuiltinTreeLayout(), ...(options.plugins ?? [])];
+    for (const p of this.scenePlugins) this.app.use(p);
     this.layout = this.app.require(AUTO_LAYOUT_CAPABILITY);
     // 文本编辑：按能力键取回官方预设（或宿主显式装配）的实例并接线场景回调。
     // 编辑回调（onInput/onEditStart/onActivate/onEditEnd）为场景接线：
@@ -218,8 +225,9 @@ export class MindMap {
       onRelayout: () => this.relayout(),
       emitChange: (type) => this.emitChange(type),
     });
-    // 左键框选与节点拖拽（含全局按键导航，统一由指针能力绑定）
-    this.drag.bind();
+    // 左键框选与节点拖拽（含全局按键导航，统一由指针能力绑定）；
+    // 指针绑定返回的撤销函数并入 cleanups，destroy 时统一执行
+    this.cleanups.push(this.drag.bind());
     // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
     // 拖拽到画布边缘时自动平移视口（rAF 常驻循环，非拖拽时空转）
@@ -287,25 +295,19 @@ export class MindMap {
       siblingGap: 20,
     });
     this.pan!.fit(this.model.getBounds(root));
+    // destroy 可能先于异步布局完成：已拆卸则不再挂载任何节点
+    if (this.destroyed) return;
     this.app.add(root);
     // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
     this.model.collectEdges(root, this.model.edges);
     this.app.add(this.model.edges);
-    // 激活高亮环最后加入，保证绘制在节点与连线之上；拖拽反馈层在其上
-    this.app.add(this.highlight);
-    this.app.add(this.ghost);
-    this.app.add(this.collapseToggle);
+    // 交互覆盖层注册为常驻顶层（按绘制次序：高亮环 → 拖拽反馈 → 折叠开关），
+    // 之后新增节点/连线由 App 自动保持覆盖层置顶
+    this.app.addOverlay(this.highlight);
+    this.app.addOverlay(this.ghost);
+    this.app.addOverlay(this.collapseToggle);
     // 异步初始化完成后必须主动渲染一次：构造函数外的首次 render 发生在 add 之前，画布会是空白
     this.app.requestRender();
-  }
-
-  // 覆盖层置顶：换父/新增/撤销等路径会向 app.children 末尾追加新连线，跑到覆盖层之上，
-  // relayout 时统一把高亮环/拖拽反馈/折叠开关提升回最上层，保证绘制顺序稳定
-  // （框选橡皮筋由选中插件在会话内挂载，不在常驻覆盖层之列）
-  private raiseOverlays() {
-    for (const n of [this.highlight, this.ghost, this.collapseToggle]) {
-      this.app.reorder(n, this.app.children.length);
-    }
   }
 
   // 文本输入后按新尺寸重新布局并渲染（元函数组装：重排 + 渲染）
@@ -313,8 +315,6 @@ export class MindMap {
     if (!this.model.root || !this.pan) return;
     // 折叠可见性联动（undo/redo 换父、拖入折叠节点等路径统一收口于此）
     this.model.applyCollapseVisibility();
-    // 新连线可能追加到了覆盖层之上，先归位再渲染
-    this.raiseOverlays();
     await this.layout.layout(this.model.root, {
       direction: this.direction,
       levelGap: 80,
@@ -328,5 +328,48 @@ export class MindMap {
   // 触发数据变化回调（重布局落定后由各变更入口调用）
   private emitChange(type: MindMapChangeType) {
     this.onChange?.(type);
+  }
+
+  // 完整拆卸（幂等，页面级销毁或显式装配下重建场景用）：
+  // 1) 撤销指针监听并停止边缘平移 rAF 循环；
+  // 2) 复位接线在宿主插件上的场景回调（编辑器/选中/空白点击可能为显式装配的
+  //    宿主所有，避免已销毁门面被插件回调持有），并结束进行中的编辑会话；
+  // 3) 注销场景命令（键位随命令一并移除）并复位分发守卫；
+  // 4) 移除场景节点与覆盖层（常驻置顶注册随之注销）；
+  // 5) 卸载构造期安装的插件（能力注册表沿 previous 链撤销/恢复）。
+  // 宿主自建的 App 与官方插件（显式装配）不受影响，可继续复用
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.cleanups.forEach((fn) => fn());
+    this.cleanups = [];
+    this.drag.stopEdgePanLoop();
+    this.editor.onInput = undefined;
+    this.editor.onEditStart = undefined;
+    this.editor.onActivate = undefined;
+    this.editor.onEditEnd = undefined;
+    this.editor.stop();
+    this.sel.hitRect = () => [];
+    this.sel.onMarqueeStart = null;
+    this.sel.onMarqueeMove = null;
+    this.sel.onMarqueeEnd = null;
+    this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(null);
+    for (const id of [
+      "mindmap.undo",
+      "mindmap.redo",
+      "mindmap.copy",
+      "mindmap.paste",
+      "mindmap.delete",
+    ]) {
+      this.commands.unregister(id);
+    }
+    this.commands.guard = null;
+    if (this.model.root) this.app.remove(this.model.root);
+    this.app.remove(this.model.edges);
+    this.app.remove(this.highlight);
+    this.app.remove(this.ghost);
+    this.app.remove(this.collapseToggle);
+    for (const p of this.scenePlugins) this.app.uninstall(p);
+    this.scenePlugins = [];
   }
 }

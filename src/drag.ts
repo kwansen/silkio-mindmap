@@ -69,9 +69,9 @@ export class DragInteractions {
   // 未超阈值的普通点击不处理，交给节点激活/空白取消逻辑
   bind() {
     // 统一指针监听：绑定/撤销与屏幕→世界坐标换算由指针能力承担（机制层），
-    // 本场景只声明各事件的交互策略
+    // 本场景只声明各事件的交互策略；返回撤销函数由门面并入 cleanups 统一管理
     const pointer = this.deps.app.require(POINTER_CAPABILITY);
-    pointer.bind(this.deps.app.canvas, {
+    return pointer.bind(this.deps.app.canvas, {
       onDown: (e, w) => {
         if (e.button !== 0) return;
         // 折叠开关命中优先于节点拖拽/框选
@@ -171,7 +171,6 @@ export class DragInteractions {
       onKeydown: (e) => this.deps.keyboard.onGlobalKeydown(e),
     });
   }
-
   // 覆盖层左键按下：与画布按下共用拖拽上下文（覆盖层恰好盖住激活节点，命中即它本身），
   // 根节点不可拖时仅记录按下位置供 mouseup 判定点击
   onOverlayDown(e: MouseEvent) {
@@ -260,6 +259,8 @@ export class DragInteractions {
   // 边缘自动平移：拖拽中鼠标贴近画布边缘时持续平移视口（越近越快），松手即停。
   // 平移改变世界↔屏幕映射，需按 lastScreen 重算虚影位置（无需鼠标再动）
   edgePanLoop = () => {
+    // stopEdgePanLoop 置位后循环自行退出（场景拆卸用）
+    if (this.panLoopStopped) return;
     const drag = this.dragState;
     if (drag && this.dragMoved) {
       const rect = this.deps.app.canvas.getBoundingClientRect();
@@ -280,6 +281,12 @@ export class DragInteractions {
     }
     requestAnimationFrame(this.edgePanLoop);
   };
+
+  // 停止边缘自动平移的 rAF 常驻循环（场景 destroy 时调用，幂等）
+  private panLoopStopped = false;
+  stopEdgePanLoop() {
+    this.panLoopStopped = true;
+  }
 
   // 世界坐标命中的最上层文本节点（选框/高亮环等辅助节点不参与命中）
   // exclude 为被拖子树：拖动中鼠标点总是压在被拖节点上，需跳过它们取其下方的真实目标
