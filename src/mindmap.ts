@@ -5,7 +5,6 @@ import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } fr
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
 import { officialPlugins } from "@silker/preset";
-import type { TextEditor } from "@silker/plugin-text-editor";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -130,7 +129,7 @@ export class MindMap {
     // 编辑回调（onInput/onEditStart/onActivate/onEditEnd）为场景接线：
     // 输入时重新布局，编辑框就绪后交由激活控制器绑定按键与两态机；
     // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
-    const editor = this.app.require(TEXT_EDITOR_CAPABILITY) as TextEditor;
+    const editor = this.app.require(TEXT_EDITOR_CAPABILITY);
     editor.onInput = () => this.relayout();
     editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);
     editor.onActivate = (text) => this.activation.activate(text);

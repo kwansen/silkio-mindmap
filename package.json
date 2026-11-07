@@ -16,7 +16,6 @@
   "dependencies": {
     "@silker/core": "workspace:*",
     "@silker/preset": "workspace:*",
-    "@silker/plugin-text-editor": "workspace:*",
     "elkjs": "^0.9.3"
   },
   "devDependencies": {
