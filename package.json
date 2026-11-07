@@ -15,8 +15,7 @@
   },
   "dependencies": {
     "@silker/core": "workspace:*",
-    "@silker/preset": "workspace:*",
-    "elkjs": "^0.9.3"
+    "@silker/preset": "workspace:*"
   },
   "devDependencies": {
     "typescript": "~6.0.2"
