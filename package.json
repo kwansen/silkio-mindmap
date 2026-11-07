@@ -15,14 +15,9 @@
   },
   "dependencies": {
     "@silker/core": "workspace:*",
-    "elkjs": "^0.9.3",
+    "@silker/preset": "workspace:*",
     "@silker/plugin-text-editor": "workspace:*",
-    "@silker/plugin-exporter": "workspace:*",
-    "@silker/plugin-selection": "workspace:*",
-    "@silker/plugin-history": "workspace:*",
-    "@silker/plugin-command": "workspace:*",
-    "@silker/plugin-interaction": "workspace:*",
-    "@silker/plugin-viewport": "workspace:*"
+    "elkjs": "^0.9.3"
   },
   "devDependencies": {
     "typescript": "~6.0.2"

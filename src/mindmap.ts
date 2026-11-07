@@ -4,13 +4,8 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { Viewport } from "@silker/plugin-viewport";
-import { TextEditor } from "@silker/plugin-text-editor";
-import { Exporter } from "@silker/plugin-exporter";
-import { Selection } from "@silker/plugin-selection";
-import { History } from "@silker/plugin-history";
-import { Command } from "@silker/plugin-command";
-import { Pointer, Clicker } from "@silker/plugin-interaction";
+import { officialPlugins } from "@silker/preset";
+import type { TextEditor } from "@silker/plugin-text-editor";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -34,7 +29,8 @@ import type {
 // 内聚逻辑拆分在同目录各模块（model/drop/collapse/editing/operations/keyboard/drag），
 // 依赖单向：drag/keyboard/operations/editing/collapse → model(MindTree) → Edge/core
 export class MindMap {
-  app: App;
+  // 装配与渲染属主：私有——外部经门面语义 API 消费，装配期定制经 MindMapOptions.app 传入
+  private app: App;
   // 视口能力（Viewport 插件 install 时注册）：按能力接口消费平移入口，不依赖具体插件实例
   private pan: ViewportCapability | null;
   // 文本编辑能力（TextEditor 插件 install 时注册）：按能力接口消费，不依赖具体插件实例
@@ -77,25 +73,15 @@ export class MindMap {
     const levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
     // 两种装配模式（对齐 FlowChartOptions.app 语义）：
-    // - 便捷模式（缺省，Application 角色）：自建 App 并安装全部官方外部插件，开箱即用；
-    // - 显式装配模式（传 app）：宿主自建 App 并安装官方外部插件（顺序与便捷模式一致，
-    //   实现均可按契约替换），本场景只补齐自有插件（BuiltinTreeLayout 等）并接线场景回调
+    // - 便捷模式（缺省，Application 角色）：自建 App 并安装官方外部插件，开箱即用；
+    // - 显式装配模式（传 app）：宿主自建 App 并安装官方外部插件（通常用
+    //   @silker/preset 的 officialPlugins()，实现均可按契约替换），
+    //   本场景只补齐自有插件（BuiltinTreeLayout 等）并接线场景回调
     this.app = options.app ?? new App(options.canvas);
     if (!options.app) {
-      // 安装历史记录插件：命令模式 undo/redo 双栈（默认容量 100），install 时自注册
-      // 历史能力，各变更入口按能力键消费（只认能力名与契约，不认插件实例）
-      this.app.use(new History());
-      // 安装命令与键位插件：撤销/重做/复制/粘贴/删除注册为命令并绑定默认键位，
-      // document keydown 由插件统一分发；应用层与第三方可按能力键复用命令或重绑键位
-      this.app.use(new Command());
-      // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口
-      this.app.use(new Viewport());
-      // 安装指针交互插件：统一事件绑定/撤销与坐标换算（机制层），交互策略由本场景声明
-      this.app.use(new Pointer());
-      // 安装点击分发插件：拖拽阈值判定、命中测试与节点/空白点击分发（机制层）
-      this.app.use(new Clicker());
-      // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
-      this.app.use(new Exporter());
+      // 便捷模式：安装官方外部插件预设（集合与顺序的单一事实来源在 @silker/preset），
+      // 各插件 install 时自注册能力，此后仅按能力键消费
+      for (const p of officialPlugins()) this.app.use(p);
     }
     // 按能力键显式依赖（require 兜底装配错误，只认能力名与契约，不认插件实例）
     this.history = this.app.require(HISTORY_CAPABILITY);
@@ -140,22 +126,20 @@ export class MindMap {
     this.app.use(new BuiltinTreeLayout());
     for (const p of options.plugins ?? []) this.app.use(p);
     this.layout = this.app.require(AUTO_LAYOUT_CAPABILITY);
-    // 文本编辑：便捷模式自建安装；显式模式按能力键取回宿主装配的实例。
-    // 编辑回调（onInput/onEditStart/onActivate/onEditEnd）为场景接线，两种模式一致：
+    // 文本编辑：按能力键取回官方预设（或宿主显式装配）的实例并接线场景回调。
+    // 编辑回调（onInput/onEditStart/onActivate/onEditEnd）为场景接线：
     // 输入时重新布局，编辑框就绪后交由激活控制器绑定按键与两态机；
     // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
-    if (!options.app) this.app.use(new TextEditor());
     const editor = this.app.require(TEXT_EDITOR_CAPABILITY) as TextEditor;
     editor.onInput = () => this.relayout();
     editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);
     editor.onActivate = (text) => this.activation.activate(text);
     editor.onEditEnd = () => this.activation.onEditEnd();
     this.editor = editor;
-    // 选中：便捷模式自建安装；显式模式按能力键取回宿主装配的实例。
+    // 选中：按能力键取回官方预设（或宿主显式装配）的实例。
     // 选中语义（激活态覆盖层、高亮环、视口跟随）由激活控制器定义；
     // 框选命中规则 = 可见文本节点与矩形相交
-    if (!options.app) this.app.use(new Selection<Text>());
-    const sel = this.app.require(selectionCapabilityKey<Text>()) as Selection<Text>;
+    const sel = this.app.require(selectionCapabilityKey<Text>());
     sel.hitRect = (rect) => this.model.textsInRect(rect);
     // 框选首帧成框：退出选中态（覆盖层交还 canvas，多选态无编辑框）
     sel.onMarqueeStart = () => this.activation.deactivate();

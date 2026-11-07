@@ -1,12 +1,6 @@
 // 入口：挂载 canvas 并渲染一张示例思维导图
-import { App, Text } from "@silker/core";
-import { Viewport } from "@silker/plugin-viewport";
-import { Command } from "@silker/plugin-command";
-import { History } from "@silker/plugin-history";
-import { Pointer, Clicker } from "@silker/plugin-interaction";
-import { Selection } from "@silker/plugin-selection";
-import { TextEditor } from "@silker/plugin-text-editor";
-import { Exporter } from "@silker/plugin-exporter";
+import { App } from "@silker/core";
+import { officialPlugins } from "@silker/preset";
 import { MindMap, type Style } from "@silker/mindmap";
 
 // 级数样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度套用最后一项
@@ -168,17 +162,10 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 // 连线样式参数：'bezier' 纯贝塞尔 S 曲线（默认），'path' Z 字折线，'rPath' 圆角 Z 字折线
 const edgeStyle: "bezier" | "path" | "zBezier" | "rPath" = "rPath";
 
-// 显式装配：自建 App 并安装官方外部插件（顺序与便捷模式一致，实现均可按契约替换），
+// 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
 // MindMap 按能力键复用这些能力，只补齐自有的布局插件
 const app = new App(canvas);
-app.use(new History()); // 撤销/重做命令栈
-app.use(new Command()); // 命令注册与默认键位
-app.use(new Viewport()); // 视口（平移/缩放/适应视图）
-app.use(new Pointer()); // 指针事件绑定与坐标换算
-app.use(new Clicker()); // 点击分发（拖拽阈值判定/节点 onClick/空白点击）
-app.use(new Exporter()); // 画布导出
-app.use(new TextEditor()); // 节点文本编辑
-app.use(new Selection<Text>()); // 单选/多选/框选模型
+for (const p of officialPlugins()) app.use(p);
 
 const mindmap = new MindMap({
   canvas,
@@ -221,7 +208,7 @@ exportBtn.addEventListener("click", async () => {
   a.click();
   URL.revokeObjectURL(url);
 });
-mindmap.app.render();
+// 初始渲染由 MindMap 异步 init 完成后自行触发（requestRender），无需外部渲染
 refreshToolbar();
 // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
 (window as any).__mindmap = mindmap;
