@@ -1,6 +1,6 @@
 // 入口：挂载 canvas 并渲染一张示例思维导图
 import { App, Text } from "@silker/core";
-import { Viewport } from "@silker/core-viewport";
+import { Viewport } from "@silker/plugin-viewport";
 import { Command } from "@silker/plugin-command";
 import { History } from "@silker/plugin-history";
 import { Pointer, Clicker } from "@silker/plugin-interaction";

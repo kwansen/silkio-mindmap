@@ -4,7 +4,7 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { Viewport } from "@silker/core-viewport";
+import { Viewport } from "@silker/plugin-viewport";
 import { TextEditor } from "@silker/plugin-text-editor";
 import { Exporter } from "@silker/plugin-exporter";
 import { Selection } from "@silker/plugin-selection";

@@ -11,7 +11,7 @@
   "devDependencies": {
     "@silker/core": "workspace:*",
     "@silker/mindmap": "workspace:*",
-    "@silker/core-viewport": "workspace:*",
+    "@silker/plugin-viewport": "workspace:*",
     "@silker/plugin-command": "workspace:*",
     "@silker/plugin-history": "workspace:*",
     "@silker/plugin-interaction": "workspace:*",
