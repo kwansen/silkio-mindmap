@@ -1,21 +1,19 @@
-import { App, Text } from "@silker/core";
-import { Viewport, VIEWPORT_CAPABILITY } from "@silker/core-viewport";
-import type { ViewportCapability } from "@silker/core-viewport";
-import { TextEditor, TEXT_EDITOR_CAPABILITY } from "@silker/plugin-text-editor";
-import type { TextEditorCapability } from "@silker/plugin-text-editor";
-import { Exporter, EXPORT_CAPABILITY } from "@silker/plugin-exporter";
-import type { ExportOptions } from "@silker/plugin-exporter";
-import { Selection, selectionCapabilityKey } from "@silker/plugin-selection";
-import type { SelectionCapability } from "@silker/plugin-selection";
-import { History, HISTORY_CAPABILITY } from "@silker/plugin-history";
-import type { HistoryCapability } from "@silker/plugin-history";
+import { App, Text, VIEWPORT_CAPABILITY } from "@silker/core";
+import type { CommandCapability, ExportOptions, HistoryCapability } from "@silker/core";
+import type { SelectionCapability, TextEditorCapability, ViewportCapability } from "@silker/core";
+import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
+import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
+import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
+import { Viewport } from "@silker/core-viewport";
+import { TextEditor } from "@silker/plugin-text-editor";
+import { Exporter } from "@silker/plugin-exporter";
+import { Selection } from "@silker/plugin-selection";
+import { History } from "@silker/plugin-history";
+import { Command } from "@silker/plugin-command";
+import { Pointer, Clicker } from "@silker/plugin-interaction";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
-import { Command, COMMAND_CAPABILITY } from "@silker/plugin-command";
-import { Pointer, POINTER_CAPABILITY } from "@silker/plugin-interaction";
-import { Clicker, CANVAS_CLICK_CAPABILITY } from "@silker/plugin-interaction";
-import type { CommandCapability } from "@silker/plugin-command";
 import { ActiveHighlight } from "./ActiveHighlight";
 import { DragGhost } from "./DragGhost";
 import { CollapseToggle } from "./CollapseToggle";
@@ -78,15 +76,29 @@ export class MindMap {
     const edgeStyle = options.edgeStyle ?? "bezier";
     const levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
-    this.app = new App(options.canvas);
-    // 安装历史记录插件：命令模式 undo/redo 双栈（默认容量 100），install 时自注册
-    // 历史能力，各变更入口按能力键消费（只认能力名与契约，不认插件实例）
-    this.app.use(new History());
+    // 两种装配模式（对齐 FlowChartOptions.app 语义）：
+    // - 便捷模式（缺省，Application 角色）：自建 App 并安装全部官方外部插件，开箱即用；
+    // - 显式装配模式（传 app）：宿主自建 App 并安装官方外部插件（顺序与便捷模式一致，
+    //   实现均可按契约替换），本场景只补齐自有插件（BuiltinTreeLayout 等）并接线场景回调
+    this.app = options.app ?? new App(options.canvas);
+    if (!options.app) {
+      // 安装历史记录插件：命令模式 undo/redo 双栈（默认容量 100），install 时自注册
+      // 历史能力，各变更入口按能力键消费（只认能力名与契约，不认插件实例）
+      this.app.use(new History());
+      // 安装命令与键位插件：撤销/重做/复制/粘贴/删除注册为命令并绑定默认键位，
+      // document keydown 由插件统一分发；应用层与第三方可按能力键复用命令或重绑键位
+      this.app.use(new Command());
+      // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口
+      this.app.use(new Viewport());
+      // 安装指针交互插件：统一事件绑定/撤销与坐标换算（机制层），交互策略由本场景声明
+      this.app.use(new Pointer());
+      // 安装点击分发插件：拖拽阈值判定、命中测试与节点/空白点击分发（机制层）
+      this.app.use(new Clicker());
+      // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
+      this.app.use(new Exporter());
+    }
+    // 按能力键显式依赖（require 兜底装配错误，只认能力名与契约，不认插件实例）
     this.history = this.app.require(HISTORY_CAPABILITY);
-    // 安装命令与键位插件：撤销/重做/复制/粘贴/删除注册为命令并绑定默认键位，
-    // document keydown 由插件统一分发；应用层与第三方可按能力键复用命令或重绑键位。
-    // install 时自注册命令能力，此后仅按能力键消费
-    this.app.use(new Command());
     this.commands = this.app.require(COMMAND_CAPABILITY);
     this.commands.guard = (e) => this.activation.keymapGuard(e);
     this.commands.register({
@@ -121,48 +133,42 @@ export class MindMap {
     this.commands.bind("mod+v", "mindmap.paste");
     this.commands.bind("delete", "mindmap.delete");
     this.commands.bind("backspace", "mindmap.delete");
-    // 安装视口插件：支持滚轮以鼠标为中心缩放、拖拽平移画布与按包围盒拟合视口；
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
-    this.app.use(new Viewport());
     this.pan = this.app.require(VIEWPORT_CAPABILITY);
-    // 安装指针交互插件：统一事件绑定/撤销与坐标换算（机制层），交互策略由本场景声明
-    this.app.use(new Pointer());
-    // 安装点击分发插件：拖拽阈值判定、命中测试与节点/空白点击分发（机制层）
-    this.app.use(new Clicker());
-    // 安装导出插件：install 时自注册导出能力，toImage 按能力键消费
-    this.app.use(new Exporter());
     // 安装官方布局插件（树形布局自注册 mindmap.auto-layout 能力），再装配应用层传入的
     // 第三方插件（可同名覆盖布局，初始数据 init 前生效）；此后仅按能力键消费布局能力
     this.app.use(new BuiltinTreeLayout());
     for (const p of options.plugins ?? []) this.app.use(p);
     this.layout = this.app.require(AUTO_LAYOUT_CAPABILITY);
-    // 安装文本编辑插件：输入时重新布局，编辑框就绪后交由激活控制器绑定按键与两态机；
-    // install 时自注册文本编辑能力，此后仅按能力键消费
-    this.app.use(
-      new TextEditor({
-        onInput: () => this.relayout(),
-        onEditStart: (el, text) => this.activation.onEditStart(el, text),
-        // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
-        onActivate: (text) => this.activation.activate(text),
-        onEditEnd: () => this.activation.onEditEnd(),
-      }),
-    );
-    this.editor = this.app.require(TEXT_EDITOR_CAPABILITY);
-    // 安装选中插件：单选/多选模型与框选会话（机制），选中语义（激活态覆盖层、
-    // 高亮环、视口跟随）由激活控制器定义；框选命中规则 = 可见文本节点与矩形相交
-    this.app.use(new Selection<Text>({ hitRect: (rect) => this.model.textsInRect(rect) }));
-    this.sel = this.app.require(selectionCapabilityKey<Text>());
+    // 文本编辑：便捷模式自建安装；显式模式按能力键取回宿主装配的实例。
+    // 编辑回调（onInput/onEditStart/onActivate/onEditEnd）为场景接线，两种模式一致：
+    // 输入时重新布局，编辑框就绪后交由激活控制器绑定按键与两态机；
+    // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
+    if (!options.app) this.app.use(new TextEditor());
+    const editor = this.app.require(TEXT_EDITOR_CAPABILITY) as TextEditor;
+    editor.onInput = () => this.relayout();
+    editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);
+    editor.onActivate = (text) => this.activation.activate(text);
+    editor.onEditEnd = () => this.activation.onEditEnd();
+    this.editor = editor;
+    // 选中：便捷模式自建安装；显式模式按能力键取回宿主装配的实例。
+    // 选中语义（激活态覆盖层、高亮环、视口跟随）由激活控制器定义；
+    // 框选命中规则 = 可见文本节点与矩形相交
+    if (!options.app) this.app.use(new Selection<Text>());
+    const sel = this.app.require(selectionCapabilityKey<Text>()) as Selection<Text>;
+    sel.hitRect = (rect) => this.model.textsInRect(rect);
     // 框选首帧成框：退出选中态（覆盖层交还 canvas，多选态无编辑框）
-    this.sel.onMarqueeStart = () => this.activation.deactivate();
+    sel.onMarqueeStart = () => this.activation.deactivate();
     // 拖框中实时应用激活样式：当前与选框相交的节点立刻高亮
-    this.sel.onMarqueeMove = (_rect, hits) => {
+    sel.onMarqueeMove = (_rect, hits) => {
       this.highlight.targets = hits;
     };
     // 框选落定：与选框相交的节点进入选中态（未选中任何节点时保持退出态，
     // 选框残留由插件松手时统一渲染清除）
-    this.sel.onMarqueeEnd = (_rect, hits) => {
+    sel.onMarqueeEnd = (_rect, hits) => {
       if (hits.length) this.activation.setSelection(hits);
     };
+    this.sel = sel;
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight();
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换

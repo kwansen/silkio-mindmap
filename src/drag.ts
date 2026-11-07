@@ -1,9 +1,9 @@
 import { App, Text } from "@silker/core";
 import type { Node } from "@silker/core";
-import type { ViewportCapability } from "@silker/core-viewport";
-import type { HistoryCapability, HistoryCommand } from "@silker/plugin-history";
-import { POINTER_CAPABILITY } from "@silker/plugin-interaction";
-import type { SelectionCapability } from "@silker/plugin-selection";
+import type { ViewportCapability } from "@silker/core";
+import type { HistoryCapability, HistoryCommand } from "@silker/core";
+import { POINTER_CAPABILITY } from "@silker/core";
+import type { SelectionCapability } from "@silker/core";
 import { DragGhost } from "./DragGhost";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import { dropIndex, dropTarget } from "./drop";

@@ -1,7 +1,7 @@
 import type { App, Text } from "@silker/core";
-import type { HistoryCapability } from "@silker/plugin-history";
-import type { SelectionCapability } from "@silker/plugin-selection";
-import type { TextEditorCapability } from "@silker/plugin-text-editor";
+import type { HistoryCapability } from "@silker/core";
+import type { SelectionCapability } from "@silker/core";
+import type { TextEditorCapability } from "@silker/core";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import type { MindMapChangeType } from "./types";
 

@@ -11,8 +11,13 @@
   "devDependencies": {
     "@silker/core": "workspace:*",
     "@silker/mindmap": "workspace:*",
-    "@silker/plugin-edge": "workspace:*",
     "@silker/core-viewport": "workspace:*",
+    "@silker/plugin-command": "workspace:*",
+    "@silker/plugin-history": "workspace:*",
+    "@silker/plugin-interaction": "workspace:*",
+    "@silker/plugin-selection": "workspace:*",
+    "@silker/plugin-text-editor": "workspace:*",
+    "@silker/plugin-exporter": "workspace:*",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }

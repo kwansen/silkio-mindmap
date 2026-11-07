@@ -1,7 +1,7 @@
 import type { App, Node, Text } from "@silker/core";
-import type { HistoryCapability, HistoryCommand } from "@silker/plugin-history";
-import type { SelectionCapability } from "@silker/plugin-selection";
-import type { TextEditorCapability } from "@silker/plugin-text-editor";
+import type { HistoryCapability, HistoryCommand } from "@silker/core";
+import type { SelectionCapability } from "@silker/core";
+import type { TextEditorCapability } from "@silker/core";
 import type { MindEdge } from "./Edge";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";

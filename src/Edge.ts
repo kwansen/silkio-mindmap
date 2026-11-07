@@ -1,4 +1,4 @@
-import { Edge as BaseEdge } from "@silker/plugin-edge"
+import { Edge as BaseEdge } from "@silker/core"
 import type { Text } from "@silker/core"
 
 // 计算节点一侧边缘中点的世界坐标（right 为 true 取右缘，否则取左缘）

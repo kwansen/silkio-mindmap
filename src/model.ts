@@ -1,5 +1,5 @@
 import { Text } from "@silker/core";
-import type { EdgeShape } from "@silker/plugin-edge";
+import type { EdgeShape } from "@silker/core";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";
 import { defaultStyle } from "./types";
