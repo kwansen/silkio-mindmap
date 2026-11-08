@@ -117,6 +117,12 @@ export class MindMap {
       title: "删除选中",
       run: () => this.operations.deleteSelection(),
     });
+    this.commands.register({
+      id: "mindmap.selectAll",
+      title: "全选",
+      run: () => this.selectAll(),
+    });
+    this.commands.bind("mod+a", "mindmap.selectAll");
     this.commands.bind("mod+z", "mindmap.undo");
     this.commands.bind("mod+shift+z", "mindmap.redo");
     this.commands.bind("mod+y", "mindmap.redo");
@@ -232,6 +238,18 @@ export class MindMap {
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
     void this.init(options.data);
+  }
+
+  // 全选：全部可见节点进入多选态（高亮环 + 批量拖拽/删除/复制可用）。
+  // 编辑态（mod+a 属输入框原生全选）或拖拽中不响应，避免与进行中的会话互踩
+  selectAll() {
+    if (this.activation.editing || this.drag.dragState) return;
+    if (!this.model.root) return;
+    const all: Text[] = [];
+    this.model.collectTexts(this.model.root, all);
+    const visible = all.filter((n) => n.visible);
+    if (!visible.length) return;
+    this.activation.setSelection(visible);
   }
 
   // 撤销：真正输入中（编辑态）或拖拽中不响应（避免与进行中的变更互踩）；激活态覆盖层
@@ -371,6 +389,7 @@ export class MindMap {
       "mindmap.copy",
       "mindmap.paste",
       "mindmap.delete",
+      "mindmap.selectAll",
     ]) {
       this.commands.unregister(id);
     }
