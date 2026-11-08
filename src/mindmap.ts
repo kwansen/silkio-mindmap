@@ -4,7 +4,6 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { officialPlugins } from "@silker/preset";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -77,17 +76,11 @@ export class MindMap {
     const edgeStyle = options.edgeStyle ?? "bezier";
     const levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
-    // 两种装配模式（对齐 FlowChartOptions.app 语义）：
-    // - 便捷模式（缺省，Application 角色）：自建 App 并安装官方外部插件，开箱即用；
-    // - 显式装配模式（传 app）：宿主自建 App 并安装官方外部插件（通常用
-    //   @silker/preset 的 officialPlugins()，实现均可按契约替换），
-    //   本场景只补齐自有插件（BuiltinTreeLayout 等）并接线场景回调
-    this.app = options.app ?? new App(options.canvas);
-    if (!options.app) {
-      // 便捷模式：安装官方外部插件预设（集合与顺序的单一事实来源在 @silker/preset），
-      // 各插件 install 时自注册能力，此后仅按能力键消费
-      for (const p of officialPlugins()) this.app.use(p);
-    }
+    // 显式装配（starter-kit 模式）：宿主自建 App 并装配官方外部插件（通常用
+    // @silker/preset 的 officialPlugins()，实现均可按契约替换），本场景只补齐
+    // 自有插件（BuiltinTreeLayout 等）并接线场景回调；
+    // 场景包不依赖 preset，装配缺口由下方 require 兜底报错
+    this.app = options.app;
     // 按能力键显式依赖（require 兜底装配错误，只认能力名与契约，不认插件实例）
     this.history = this.app.require(HISTORY_CAPABILITY);
     this.commands = this.app.require(COMMAND_CAPABILITY);
@@ -142,7 +135,7 @@ export class MindMap {
     editor.onActivate = (text) => this.activation.activate(text);
     editor.onEditEnd = () => this.activation.onEditEnd();
     this.editor = editor;
-    // 选中：按能力键取回官方预设（或宿主显式装配）的实例。
+    // 选中：按能力键取回宿主装配（通常为官方预设）的实例。
     // 选中语义（激活态覆盖层、高亮环、视口跟随）由激活控制器定义；
     // 框选命中规则 = 可见文本节点与矩形相交
     const sel = this.app.require(selectionCapabilityKey<Text>());

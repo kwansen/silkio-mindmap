@@ -168,7 +168,6 @@ const app = new App(canvas);
 for (const p of officialPlugins()) app.use(p);
 
 const mindmap = new MindMap({
-  canvas,
   app,
   data,
   direction: "right",

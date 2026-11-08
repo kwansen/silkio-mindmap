@@ -14,8 +14,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@silker/core": "workspace:*",
-    "@silker/preset": "workspace:*"
+    "@silker/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "~6.0.2"

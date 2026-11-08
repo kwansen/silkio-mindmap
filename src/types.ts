@@ -43,12 +43,11 @@ export const defaultStyle: Style = {
 };
 
 export interface MindMapOptions {
-  canvas: HTMLCanvasElement;
-  // 显式装配模式：传入宿主自建的 App（要求已按便捷模式顺序安装官方外部插件
+  // 显式装配（starter-kit 模式）：传入宿主自建的 App（要求已安装官方外部插件
   // History/Command/Viewport/Pointer/Clicker/Exporter/TextEditor/Selection，
-  // 实现均可按契约替换），MindMap 复用之并只补齐自有插件；缺省时自建 App
-  // 并安装全部官方插件（便捷模式，开箱即用）
-  app?: App;
+  // 通常经 @silker/preset 的 officialPlugins()，实现均可按契约替换），
+  // MindMap 复用之并只补齐自有插件；场景包不依赖 preset，缺失能力由 require 兜底报错
+  app: App;
   data: MindMapNode;
   // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），默认 'left'
   direction?: "left" | "right";
