@@ -292,8 +292,10 @@ export class DragInteractions {
       const zone = 48;
       const { clientX: x, clientY: y } = drag.lastScreen;
       const axis = (near: number, far: number) => {
-        if (near < zone) return -Math.max(4, 12 * (1 - near / zone));
-        if (far < zone) return Math.max(4, 12 * (1 - far / zone));
+        // 触顶/触左 → 平移量增大（内容向屏幕下/右移动，露出上/左侧内容）；
+        // 触底/触右 → 平移量减小（内容上/左移，露出下/右侧内容）
+        if (near < zone) return Math.max(4, 12 * (1 - near / zone));
+        if (far < zone) return -Math.max(4, 12 * (1 - far / zone));
         return 0;
       };
       const vx = axis(x - rect.left, rect.right - x);
@@ -301,6 +303,9 @@ export class DragInteractions {
       if (vx || vy) {
         const vp = this.deps.app.camera.viewport;
         this.deps.app.camera.setViewport({ ...vp, x: vp.x + vx, y: vp.y + vy });
+        // 相机-only 路径：内容层从快照差量 blit、天空层重绘，两层同步移动；
+        // updateDrag 再重算虚影/落点（覆盖层走轻量路径，与相机呈现同帧合并）
+        this.deps.app.requestCameraRender();
         this.updateDrag(drag.lastScreen);
       }
     }
