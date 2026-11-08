@@ -462,6 +462,24 @@ export class DragInteractions {
             this.deps.model.applyNodeStyle(m.node, m.oldStyle);
           }
         },
+        // 序列化载荷：节点/父级/连线全部按 id 引用（同父多选时多条 move 共享
+        // newParentId；连线经会话注册表按 id 去重，换父前后的连线引用保持同一实例）
+        toJSON: () => ({
+          kind: "mindmap.move",
+          payload: {
+            moves: moves.map((m) => ({
+              nodeId: m.node.id,
+              oldParentId: m.oldParent.id,
+              oldIndex: m.oldIndex,
+              newParentId: parent.id,
+              newIndex: m.newIndex,
+              oldStyle: m.oldStyle,
+              newStyle: m.newStyle,
+              oldEdgeId: m.oldEdge.id,
+              newEdgeId: m.newEdge.id,
+            })),
+          },
+        }),
       };
       this.deps.history.exec(cmd);
     }

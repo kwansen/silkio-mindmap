@@ -67,6 +67,17 @@ export class NodeOperations {
         this.deps.model.edges = this.deps.model.edges.filter((edge2) => edge2 !== edge);
         this.deps.app.remove(edge);
       },
+      // 序列化载荷：node 定格完整子树数据（含生效样式与 id），父级与连线按 id 引用，
+      // 导入端经编解码器按 id 重建/解析引用后重放同一挂载/摘除语义
+      toJSON: () => ({
+        kind: "mindmap.add",
+        payload: {
+          parentId: parent.id,
+          index,
+          edgeId: edge.id,
+          node: this.deps.model.serializeForHistory(node),
+        },
+      }),
     };
     this.deps.history.exec(cmd);
     this.deps.editor.bind(node);
@@ -118,6 +129,23 @@ export class NodeOperations {
           this.deps.app.add(e);
         });
       },
+      // 序列化载荷：被删节点脱离树，须内嵌完整子树数据；待清理连线按 (from,to) 端点
+      // id 引用（mindmap 连线严格父→子一对一，端点二元组唯一标识一条边）
+      toJSON: () => ({
+        kind: "mindmap.delete",
+        payload: {
+          captures: captures.map(({ node, parent, index }) => ({
+            parentId: parent.id,
+            index,
+            node: this.deps.model.serializeForHistory(node),
+          })),
+          dead: dead.map((e) => ({
+            id: e.id,
+            fromId: e.fromNode.id,
+            toId: e.toNode.id,
+          })),
+        },
+      }),
     };
     this.deps.history.exec(cmd);
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
@@ -166,7 +194,8 @@ export class NodeOperations {
     // （redo/undo 只做挂载/摘除，重复创建会导致连线翻倍且撤销残留）
     const depth = this.deps.model.depthOf(parent) + 1;
     const inserts = this.clipboard.map((data, i) => {
-      const node = this.deps.model.renderNode(data, depth);
+      // 粘贴前剥除 id：粘贴出的子树须是新节点（自动生成新 id），不与源子树共享 id
+      const node = this.deps.model.renderNode(this.deps.model.stripIds(data), depth);
       const inner: MindEdge[] = [];
       this.deps.model.collectEdges(node, inner);
       const edge = this.deps.model.createEdge(parent, node);
@@ -193,6 +222,21 @@ export class NodeOperations {
           removed.forEach((e2) => this.deps.app.remove(e2));
         }
       },
+      // 序列化载荷：粘贴子树内嵌数据（含生效样式与 id），外层连线与子树内部连线
+      // 按 id 引用；innerEdgeIds 顺序与 collectEdges 深度先序一致，编解码器按同序
+      // 重建连线对象
+      toJSON: () => ({
+        kind: "mindmap.paste",
+        payload: {
+          inserts: inserts.map(({ parent: p, node, edge, inner, index: idx }) => ({
+            parentId: p.id,
+            index: idx,
+            node: this.deps.model.serializeForHistory(node),
+            edgeId: edge.id,
+            innerEdgeIds: inner.map((e) => e.id),
+          })),
+        },
+      }),
     };
     this.deps.history.exec(cmd);
     // 为粘贴子树绑定点击激活（app.add 包装只覆盖经它挂载的节点，splice 挂载的需手动绑定）

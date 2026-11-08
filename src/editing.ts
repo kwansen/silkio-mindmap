@@ -124,6 +124,11 @@ export class ActivationController {
         undo: () => {
           node.text = before;
         },
+        // 序列化载荷：节点按 id 引用，before/after 为纯文本快照
+        toJSON: () => ({
+          kind: "mindmap.text",
+          payload: { nodeId: node.id, before, after },
+        }),
       });
     }
     this.deps.emitChange("text");

@@ -38,15 +38,57 @@ export class MindTree {
     return this.serializeNode(this.root);
   }
 
-  // 把节点子树序列化为数据节点（toJSON 与复制共用）：文本 + 自定义样式 + 折叠态 + 子孙递归
+  // 把节点子树序列化为数据节点（toJSON 与复制共用）：id + 文本 + 自定义样式 + 折叠态 + 子孙递归
   serializeNode(n: Text): MindMapNode {
     const walk = (node: Text): MindMapNode => ({
+      id: node.id ?? undefined,
       text: node.text,
       ...(this.customStyles.has(node) ? { style: this.customStyles.get(node)! } : {}),
       ...(node.collapsed ? { collapsed: true } : {}),
       children: node.children.map((c) => walk(c as Text)),
     });
     return walk(n);
+  }
+
+  // 历史命令载荷专用序列化：与 serializeNode 的差别是每个节点都定格"创建时实际生效
+  // 的样式"（customStyles 优先，缺省用 nodeStyles）——导入重建按显式样式还原，
+  // 不依赖重建时刻的级数上下文，避免 depth 漂移导致样式偏差
+  serializeForHistory(n: Text): MindMapNode {
+    const walk = (node: Text): MindMapNode => ({
+      id: node.id ?? undefined,
+      text: node.text,
+      style: this.customStyles.get(node) ?? this.nodeStyles.get(node),
+      ...(node.collapsed ? { collapsed: true } : {}),
+      children: node.children.map((c) => walk(c as Text)),
+    });
+    return walk(n);
+  }
+
+  // 剪贴板粘贴前深拷贝并剥除 id：粘贴出的节点须是新节点（Node 自动生成新 id），
+  // 不得与源子树共享 id
+  stripIds(data: MindMapNode): MindMapNode {
+    return {
+      ...data,
+      id: undefined,
+      children: data.children.map((c) => this.stripIds(c)),
+    };
+  }
+
+  // 按 id 在树中查找节点（历史命令导入重建的引用解析入口；脱离树的节点查不到，
+  // 由编解码器的会话注册表兜底）
+  nodeById(id: string): Text | null {
+    if (!this.root) return null;
+    let found: Text | null = null;
+    const walk = (n: Text) => {
+      if (found) return;
+      if (n.id === id) {
+        found = n;
+        return;
+      }
+      n.children.forEach((c) => walk(c as Text));
+    };
+    walk(this.root);
+    return found;
   }
 
   // 折叠可见性联动：折叠节点的整个子树置为不可见（含连线），展开则恢复可见。
@@ -167,16 +209,19 @@ export class MindTree {
   }
 
   // 第一次递归：把数据节点转成 Text 节点树（x/y 留空，由布局器统一确定）
-  // 样式解析优先级：节点数据 style > levelStyles[depth]（超出配置长度套用最后一项）> 兜底样式
-  renderNode(data: MindMapNode, depth = 0): Text {
+  // 样式解析优先级：节点数据 style > levelStyles[depth]（超出配置长度套用最后一项）> 兜底样式。
+  // styleAsDefault（历史命令导入重建用）：数据显式 style 只写入 nodeStyles 缓存、
+  // 不登记 customStyles——载荷定格的是"当时生效样式"，不改变节点未来的级数样式语义；
+  // 数据 id 透传（未提供时 Node 自动生成），供历史命令按 id 恢复引用同一性
+  renderNode(data: MindMapNode, depth = 0, styleAsDefault = false): Text {
     const style = data.style ?? this.levelStyle(depth);
-    const text = this.createText(data.text, style);
+    const text = this.createText(data.text, style, undefined, data.id);
     text.collapsed = data.collapsed ?? false;
     this.nodeStyles.set(text, style);
-    if (data.style) this.customStyles.set(text, data.style);
+    if (data.style && !styleAsDefault) this.customStyles.set(text, data.style);
     // 递归调用自身，将每个子数据转成子节点并挂到当前节点下
     data.children.forEach((child) =>
-      text.add(this.renderNode(child, depth + 1)),
+      text.add(this.renderNode(child, depth + 1, styleAsDefault)),
     );
     return text;
   }
@@ -210,8 +255,10 @@ export class MindTree {
     text: string,
     style: Style,
     widthRange?: [number, number],
+    id?: string,
   ): Text {
     return new Text({
+      id,
       x: 0,
       y: 0,
       wrap: true,

@@ -1,5 +1,11 @@
 import { App, Text, VIEWPORT_CAPABILITY } from "@silker/core";
-import type { CommandCapability, ExportOptions, HistoryCapability, Plugin } from "@silker/core";
+import type {
+  CommandCapability,
+  ExportOptions,
+  HistoryCapability,
+  HistorySnapshot,
+  Plugin,
+} from "@silker/core";
 import type { SelectionCapability, TextEditorCapability, ViewportCapability } from "@silker/core";
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
@@ -11,6 +17,7 @@ import { ActiveHighlight } from "./ActiveHighlight";
 import { DragGhost } from "./DragGhost";
 import { CollapseToggle } from "./CollapseToggle";
 import { MindTree } from "./model";
+import { createMindmapCodec } from "./history-codec";
 import { CollapseController } from "./collapse";
 import { ActivationController } from "./editing";
 import { NodeOperations } from "./operations";
@@ -261,6 +268,20 @@ export class MindMap {
   // 导出当前数据树：文本 + 子树 + 节点自定义样式 + 折叠态（级数默认样式不入档，避免与 levelStyles 重复）
   toJSON(): MindMapNode {
     return this.model.toJSON();
+  }
+
+  // 导出历史栈为可序列化快照（撤销栈在先、重做栈在后）：栈内含不可序列化命令
+  // （如三方闭包命令）时返回 null，拒绝部分导出
+  exportHistory(): HistorySnapshot | null {
+    return this.history.exportJSON?.() ?? null;
+  }
+
+  // 导入历史快照替换当前撤销/重做栈：命令按 kind 经领域编解码器重建，节点引用
+  // 按 id 解析——数据节点 id 须与导出时同源（用带 id 的 toJSON() 往返），任一
+  // 命令重建失败返回 false 且原栈不变
+  importHistory(data: HistorySnapshot): boolean {
+    const codec = createMindmapCodec({ model: this.model, app: this.app });
+    return this.history.importJSON?.(data, (s) => codec.decode(s)) ?? false;
   }
 
   // 导出整棵树为图片（返回 Blob）：委托导出能力离屏渲染，与当前视口无关；

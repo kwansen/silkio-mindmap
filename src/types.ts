@@ -20,6 +20,9 @@ export interface Style {
 }
 
 export interface MindMapNode {
+  // 节点稳定标识：序列化时自动捕获（运行时 Text 自带 id），供历史命令序列化
+  // 与数据往返时保持节点同一性；缺省时运行时自动生成
+  id?: string;
   text: string;
   // 节点样式：缺省时按级数回退到 levelStyles 配置（用户数据可覆盖级数配置）
   style?: Style;

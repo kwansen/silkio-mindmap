@@ -13,7 +13,7 @@ export class DragGhost extends Node {
   target: Text | null = null;
   // 布局镜像：从右向左布局（direction 'left'）时连线锚点左右互换
   mirror = false;
-  // 落点连线：复用底层 Edge 绘制与思维导图一致的贝塞尔曲线，蓝色透明
+  // 落点连线：复用底层 Edge 绘制与思维导图一致的贝塞尔曲线
   private link = new Edge({ color: "rgba(255, 187, 235, 1)" });
 
   // 反馈层不参与点击命中测试
