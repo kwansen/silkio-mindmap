@@ -46,7 +46,9 @@ export class KeyboardNav {
     }
   };
 
-  // 方向键导航：上下在整棵树内按视觉位置选垂直方向最近的节点（可跨分支），左右按布局方向进入首子节点或回父节点
+  // 方向键导航：方向感知——横向布局（left/right）上下在整棵树内按视觉位置选垂直方向最近的
+  // 节点（可跨分支），左右按布局方向进入首子节点或回父节点；纵向布局（down）层级与兄弟轴互换：
+  // 上下进入首子节点/回父节点，左右按视觉位置选水平方向最近的兄弟（可跨分支）。
   // 多选时以选集左上角节点为锚点，先收敛为单选再导航（Tab/Enter 在多选下不生效，见 onGlobalKeydown）
   navigate(key: string) {
     const root = this.deps.model.root;
@@ -57,6 +59,24 @@ export class KeyboardNav {
     }
     const current = this.deps.activation.active ?? this.topLeftSelection();
     if (!this.deps.activation.active) this.deps.activation.activate(current);
+    if (this.deps.direction === "down") {
+      // 纵向布局：↓ 进入首子节点，↑ 回父节点，←→ 水平导航兄弟
+      if (key === "ArrowDown" || key === "ArrowUp") {
+        const toChild = key === "ArrowDown";
+        if (toChild) {
+          if (!current.children.length) return;
+          // 折叠节点进入首子节点前先展开
+          if (current.collapsed) void this.deps.collapse.toggle(current);
+          this.deps.activation.activate(current.children[0] as Text);
+        } else {
+          const parent = current.parent as Text | null;
+          if (parent) this.deps.activation.activate(parent);
+        }
+        return;
+      }
+      this.navigateHorizontal(key as "ArrowLeft" | "ArrowRight", current);
+      return;
+    }
     if (key === "ArrowUp" || key === "ArrowDown") {
       this.navigateVertical(key, current);
       return;
@@ -129,6 +149,59 @@ export class KeyboardNav {
         const r = rect(n);
         const dx = Math.max(0, cur.left - r.right, r.left - cur.right);
         const d = dx + distY(n);
+        if (d < bestScore) {
+          bestScore = d;
+          best = n;
+        }
+      }
+    }
+    if (best) this.deps.activation.activate(best);
+  }
+
+  // 水平导航（纵向布局 down 用）：←→ 选择左/右方最近的兄弟 —— 先取垂直区间重叠者
+  // （正左/正右），无重叠时再取斜向矩形间距最近者（斜左/斜右），↑↓ 仍负责层级移动
+  // （与 navigateVertical 同一骨架，度量轴互换）
+  private navigateHorizontal(key: "ArrowLeft" | "ArrowRight", current: Text) {
+    const cp = current.getWorldPoint();
+    const cur = {
+      top: cp.y,
+      bottom: cp.y + current.height,
+      cx: cp.x + current.width / 2,
+    };
+    const leftward = key === "ArrowLeft";
+    const all: Text[] = [];
+    this.deps.model.collectTexts(this.deps.model.root!, all);
+    const cands = all.filter((n) => {
+      // 折叠隐藏的节点不参与导航
+      if (!n.visible) return false;
+      if (n === current) return false;
+      const p = n.getWorldPoint();
+      const cx = p.x + n.width / 2;
+      return leftward ? cx < cur.cx - 0.5 : cx > cur.cx + 0.5;
+    });
+    if (!cands.length) return;
+    // 世界包围盒与水平距离工具
+    const rect = (n: Text) => {
+      const p = n.getWorldPoint();
+      return { top: p.y, bottom: p.y + n.height, cx: p.x + n.width / 2 };
+    };
+    const distX = (n: Text) => Math.abs(rect(n).cx - cur.cx);
+    let best: Text | null = null;
+    let bestScore = Infinity;
+    // 第一优先：垂直区间与当前节点重叠（正左/正右），水平距离最近者
+    for (const n of cands) {
+      const r = rect(n);
+      if (r.top < cur.bottom && r.bottom > cur.top && distX(n) < bestScore) {
+        bestScore = distX(n);
+        best = n;
+      }
+    }
+    // 第二优先：斜左/斜右，按 垂直间距 + 水平距离 度量取最近（行相邻性优先于微小的宽度差）
+    if (best === null) {
+      for (const n of cands) {
+        const r = rect(n);
+        const dy = Math.max(0, cur.top - r.bottom, r.top - cur.bottom);
+        const d = dy + distX(n);
         if (d < bestScore) {
           bestScore = d;
           best = n;

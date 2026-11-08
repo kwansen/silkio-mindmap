@@ -52,8 +52,9 @@ export interface MindMapOptions {
   // MindMap 复用之并只补齐自有插件；场景包不依赖 preset，缺失能力由 require 兜底报错
   app: App;
   data: MindMapNode;
-  // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），默认 'left'
-  direction?: "left" | "right";
+  // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），
+  // 'down' 自上而下（子节点在父节点下方水平排列，即组织结构图布局），默认 'left'
+  direction?: "left" | "right" | "down";
   // 按级数的样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度时套用最后一项。
   // 节点数据上的 style 优先于级数配置；新建节点（Tab/Enter）按其级数取样式
   levelStyles?: Style[];

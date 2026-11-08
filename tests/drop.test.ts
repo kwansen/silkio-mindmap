@@ -112,26 +112,61 @@ describe("dropTarget 落点候选", () => {
     // 间距 620 > DROP_RANGE 不命中
     expect(dropTarget([a], box(-400, 0, 80, 40), NO_DRAG, "left")).toBe(null);
   });
+
+  it("纵向布局（down）：取合集顶缘与候选节点底缘的垂直间距，落在 DROP_RANGE 内命中", () => {
+    const a = f(0, 0); // 底缘 40
+    const root = f(0, 0, 0, 0, { children: [a] });
+    // 合集顶缘 90 → 间距 50，水平有重叠
+    expect(dropTarget([root], box(20, 90, 60, 40), NO_DRAG, "down")).toBe(a);
+    // 间距 600 > DROP_RANGE(500) 不命中
+    expect(dropTarget([root], box(20, 640, 60, 40), NO_DRAG, "down")).toBe(null);
+  });
+
+  it("纵向布局（down）：合集顶缘高于候选节点底缘（负间距）不命中", () => {
+    const a = f(0, 400); // 底缘 440 > 合集顶缘 100
+    expect(dropTarget([a], box(0, 100, 60, 40), NO_DRAG, "down")).toBe(null);
+  });
+
+  it("纵向布局（down）：水平无重叠（子树横向跨度外）不命中", () => {
+    const a = f(0, 0);
+    const root = f(0, 0, 0, 0, { children: [a] });
+    // 合集 x [500, 560] 与子树横向跨度 [0, 100] 无重叠
+    expect(dropTarget([root], box(500, 90, 60, 40), NO_DRAG, "down")).toBe(null);
+  });
 });
 
 describe("dropIndex 插入序号", () => {
-  it("按子节点垂直中点与 dropY 的严格小于比较计数", () => {
+  it("横向布局：按子节点垂直中点与 dropPoint.y 的严格小于比较计数", () => {
     const c1 = f(0, 0); // 中点 20
     const c2 = f(0, 100); // 中点 120
     const c3 = f(0, 200); // 中点 220
     const parent = f(0, 0, 0, 0, { children: [c1, c2, c3] });
-    expect(dropIndex(parent, -10)).toBe(0);
-    expect(dropIndex(parent, 20)).toBe(0); // 等于中点不计入上方
-    expect(dropIndex(parent, 21)).toBe(1);
-    expect(dropIndex(parent, 121)).toBe(2);
-    expect(dropIndex(parent, 1000)).toBe(3);
+    const at = (y: number) => ({ x: 0, y });
+    expect(dropIndex(parent, at(-10), "right")).toBe(0);
+    expect(dropIndex(parent, at(20), "right")).toBe(0); // 等于中点不计入上方
+    expect(dropIndex(parent, at(21), "right")).toBe(1);
+    expect(dropIndex(parent, at(121), "right")).toBe(2);
+    expect(dropIndex(parent, at(1000), "right")).toBe(3);
   });
 
-  it("折叠隐藏的子节点不占位统计", () => {
+  it("横向布局：折叠隐藏的子节点不占位统计", () => {
     const c1 = f(0, 0);
     const c2 = f(0, 100, 100, 40, { visible: false });
     const c3 = f(0, 200);
     const parent = f(0, 0, 0, 0, { children: [c1, c2, c3] });
-    expect(dropIndex(parent, 121)).toBe(1);
+    expect(dropIndex(parent, { x: 0, y: 121 }, "right")).toBe(1);
+  });
+
+  it("纵向布局（down）：按子节点水平中点与 dropPoint.x 的严格小于比较计数", () => {
+    const c1 = f(0, 0); // 中点 50
+    const c2 = f(100, 0); // 中点 150
+    const c3 = f(200, 0); // 中点 250
+    const parent = f(0, 0, 0, 0, { children: [c1, c2, c3] });
+    const at = (x: number) => ({ x, y: 0 });
+    expect(dropIndex(parent, at(-10), "down")).toBe(0);
+    expect(dropIndex(parent, at(50), "down")).toBe(0); // 等于中点不计入左方
+    expect(dropIndex(parent, at(51), "down")).toBe(1);
+    expect(dropIndex(parent, at(151), "down")).toBe(2);
+    expect(dropIndex(parent, at(1000), "down")).toBe(3);
   });
 });

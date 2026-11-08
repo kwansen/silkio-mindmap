@@ -63,24 +63,51 @@ const levelStyles: Style[] = [
 const data = {
   text: "中心主题",
   children: [
-    // {
-    //   text: "前端",
-    //   children: [
-    //     {
-    //       text: "框架",
-    //       children: [
-    //         { text: "React", children: [] },
-    //         { text: "Vue", children: [] },
-    //         { text: "Svelte", children: [] },
-    //       ],
-    //     },
-    //     {
-    //       text: "构建工具",
-    //       children: [
-    //         { text: "Vite", children: [] },
-    //         { text: "Webpack", children: [] },
-    //       ],
-    //     },
+    {
+      text: "前端",
+      children: [
+        { text: "React", children: [] },
+        { text: "Vue", children: [] },
+      ],
+    },
+    {
+      text: "后端",
+      children: [
+        { text: "Node.js", children: [] },
+        { text: "数据库", children: [{ text: "MySQL", children: [] }] },
+      ],
+    },
+    {
+      text: "运维",
+      children: [
+        { text: "Docker", children: [] },
+        { text: "K8s", children: [] },
+      ],
+    },
+    {
+      text: "测试",
+      children: [{ text: "Vitest", children: [] }],
+    },
+  ],
+  // 更多示例（取消注释可替换上方 children 观察 deeper 布局）：
+  // {
+  //   text: "前端",
+  //   children: [
+  //     {
+  //       text: "框架",
+  //       children: [
+  //         { text: "React", children: [] },
+  //         { text: "Vue", children: [] },
+  //         { text: "Svelte", children: [] },
+  //       ],
+  //     },
+  //     {
+  //       text: "构建工具",
+  //       children: [
+  //         { text: "Vite", children: [] },
+  //         { text: "Webpack", children: [] },
+  //       ],
+  //     },
     //     {
     //       text: "样式方案",
     //       children: [
@@ -155,7 +182,6 @@ const data = {
     //     },
     //   ],
     // },
-  ],
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -163,30 +189,48 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const edgeStyle: "bezier" | "path" | "zBezier" | "rPath" = "rPath";
 
 // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
-// MindMap 按能力键复用这些能力，只补齐自有的布局插件
+// MindMap 按能力键复用这些能力，只补齐自有的布局插件。
+// App 与官方插件在布局切换时复用，MindMap 场景实例按方向重建（destroy 对称拆卸）
 const app = new App(canvas);
 for (const p of officialPlugins()) app.use(p);
-
-const mindmap = new MindMap({
-  app,
-  data,
-  direction: "right",
-  levelStyles,
-  edgeStyle,
-  // 数据变化（新增/删除/移动/文本编辑）时打印当前数据 JSON
-  onChange: (type) => {
-    console.log(`[MindMap] ${type}`, JSON.stringify(mindmap.toJSON(), null, 2));
-    refreshToolbar();
-  },
-});
 
 // 撤销/重做工具条：点击触发对应操作，按历史栈可用性禁用按钮（含 undo/redo 后刷新）
 const undoBtn = document.getElementById("undo-btn") as HTMLButtonElement;
 const redoBtn = document.getElementById("redo-btn") as HTMLButtonElement;
+const directionSelect = document.getElementById(
+  "direction-select",
+) as HTMLSelectElement;
+
+let mindmap: MindMap;
 const refreshToolbar = () => {
   undoBtn.disabled = !mindmap.canUndo;
   redoBtn.disabled = !mindmap.canRedo;
 };
+
+// 按布局方向创建 MindMap 场景实例（切换布局时销毁旧实例重建，宿主 App 不动）
+function createMindmap(direction: "left" | "right" | "down") {
+  mindmap?.destroy();
+  mindmap = new MindMap({
+    app,
+    data,
+    direction,
+    levelStyles,
+    edgeStyle,
+    // 数据变化（新增/删除/移动/文本编辑）时打印当前数据 JSON
+    onChange: (type) => {
+      console.log(`[MindMap] ${type}`, JSON.stringify(mindmap.toJSON(), null, 2));
+      refreshToolbar();
+    },
+  });
+  refreshToolbar();
+}
+
+// 布局方向切换：横向思维导图（right）/ 左向思维导图（left）/ 组织结构图（down）
+directionSelect.addEventListener("change", () => {
+  createMindmap(directionSelect.value as "left" | "right" | "down");
+});
+createMindmap("right");
+
 undoBtn.addEventListener("click", async () => {
   await mindmap.undo();
   refreshToolbar();

@@ -27,11 +27,13 @@ export class CollapseController {
 
   constructor(private deps: CollapseDeps) {}
 
-  // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外。
-  // 折叠态（+）常显；展开态（−）仅鼠标悬浮该节点时显示（拖拽/框选中一律隐藏）
+  // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外
+  // （横向布局在左/右缘，纵向布局在底缘）。折叠态（+）常显；展开态（−）仅鼠标悬浮
+  // 该节点时显示（拖拽/框选中一律隐藏）
   items(): { node: Text; x: number; y: number; collapsed: boolean }[] {
     const root = this.deps.model.root;
     if (!root) return [];
+    const vertical = this.deps.direction === "down";
     const ltr = this.deps.direction === "right";
     // 拖拽或框选进行中隐藏全部展开态开关，避免与交互反馈叠加
     const busy = this.deps.isBusy();
@@ -41,12 +43,21 @@ export class CollapseController {
       if (!n.visible) return;
       if (n.children.length && (n.collapsed || (!busy && this.hoverToggles.has(n)))) {
         const p = n.getWorldPoint();
-        out.push({
-          node: n,
-          x: ltr ? p.x + n.width + TOGGLE_GAP : p.x - TOGGLE_GAP,
-          y: p.y + n.height / 2,
-          collapsed: n.collapsed,
-        });
+        out.push(
+          vertical
+            ? {
+                node: n,
+                x: p.x + n.width / 2,
+                y: p.y + n.height + TOGGLE_GAP,
+                collapsed: n.collapsed,
+              }
+            : {
+                node: n,
+                x: ltr ? p.x + n.width + TOGGLE_GAP : p.x - TOGGLE_GAP,
+                y: p.y + n.height / 2,
+                collapsed: n.collapsed,
+              },
+        );
       }
       n.children.forEach((c) => walk(c as Text));
     };
@@ -97,12 +108,35 @@ export class CollapseController {
     }
   }
 
-  // 节点到各可见子节点连线构成的覆盖矩形（不含节点自身盒体）：连线（三种 shape 皆然）
-  // 始终落在 [节点近端边缘, 子锚点] × [父锚 y, 子锚 y] 的范围内。悬浮节点本体不触发显示，
+  // 节点到各可见子节点连线构成的覆盖矩形（不含节点自身盒体）：
+  // 横向布局——连线（三种 shape 皆然）始终落在 [节点近端边缘, 子锚点] × [父锚 y, 子锚 y] 的范围内，
+  // 纵向布局——落在 [父底缘, 子顶缘] × [父锚 x, 子锚 x] 的范围内。悬浮节点本体不触发显示，
   // 仅连线区域触发；无可见子节点返回 null（无连线即无区域）
   private toggleHoverRect(n: Text) {
+    const vertical = this.deps.direction === "down";
     const ltr = this.deps.direction === "right";
     const p = n.getWorldPoint();
+    if (vertical) {
+      // 起点为节点底缘（悬浮节点本体不算），横向含父锚 x（连线由此引出）
+      let x0 = p.x + n.width / 2;
+      let x1 = x0;
+      let y0 = p.y + n.height;
+      let y1 = y0;
+      let has = false;
+      n.children.forEach((c) => {
+        const t = c as Text;
+        if (!t.visible) return;
+        const cp = t.getWorldPoint();
+        const ax = cp.x + t.width / 2;
+        const ay = cp.y;
+        x0 = Math.min(x0, ax);
+        x1 = Math.max(x1, ax);
+        y0 = Math.min(y0, ay);
+        y1 = Math.max(y1, ay);
+        has = true;
+      });
+      return has ? { x0, y0, x1, y1 } : null;
+    }
     // 起点为节点近端边缘（悬浮节点本体不算），纵向含父锚 y（连线由此引出）
     let x0 = ltr ? p.x + n.width : p.x;
     let x1 = x0;
@@ -130,6 +164,7 @@ export class CollapseController {
     const out = new Set<Text>();
     const root = this.deps.model.root;
     if (!root) return out;
+    const vertical = this.deps.direction === "down";
     const ltr = this.deps.direction === "right";
     const walk = (n: Text) => {
       if (!n.visible) return;
@@ -140,8 +175,12 @@ export class CollapseController {
         } else {
           // 矩形外但压在开关圆上（从节点移向开关的过渡区），保持显示
           const p = n.getWorldPoint();
-          const cx = ltr ? p.x + n.width + TOGGLE_GAP : p.x - TOGGLE_GAP;
-          const cy = p.y + n.height / 2;
+          const cx = vertical
+            ? p.x + n.width / 2
+            : ltr
+              ? p.x + n.width + TOGGLE_GAP
+              : p.x - TOGGLE_GAP;
+          const cy = vertical ? p.y + n.height + TOGGLE_GAP : p.y + n.height / 2;
           if (Math.hypot(w.x - cx, w.y - cy) <= TOGGLE_RADIUS + 4) out.add(n);
         }
       }

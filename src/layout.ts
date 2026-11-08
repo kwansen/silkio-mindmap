@@ -3,12 +3,48 @@ import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout"
 import type { AutoLayoutCapability, AutoLayoutOptions } from "./auto-layout"
 
 // 思维导图树形布局（官方实现）：参数契约见 ./auto-layout（AutoLayoutOptions），
-// 实现直接采用能力契约类型，保证实现与契约天然一致
+// 实现直接采用能力契约类型，保证实现与契约天然一致。
+// 横向布局（left/right）：子树纵向堆叠于父节点左/右侧；纵向布局（down，组织结构图）：
+// 子树横向排列于父节点下方——同一递归骨架，度量轴按方向旋转
 export function layout<T extends Node>(
   root: T,
   options: AutoLayoutOptions
 ): T {
-  // 递归布局子树，返回子树内容相对节点顶部的纵向范围 [top, bottom]（top 可为负）
+  // 纵向布局（down）：递归布局子树，返回子树内容相对节点左缘的横向范围 [left, right]（left 可为负）
+  function visitDown(node: Node): { left: number; right: number } {
+    // 折叠节点视作叶子：子树不参与布局（保持原位，由可见性联动隐藏）
+    if (node.collapsed || node.children.length === 0) {
+      return { left: 0, right: node.width }
+    }
+
+    // 先递归布局各子树，拿到它们内容相对各自节点左缘的横向范围
+    const extents = node.children.map(child => visitDown(child))
+
+    // 按内容实际占位宽度横向排列兄弟子树（而非递归宽度），保证兄弟分支互不重叠
+    let cursor = 0
+    const offsets = node.children.map((child, i) => {
+      const { left, right } = extents[i]
+      const offset = cursor - left
+      cursor += right - left + options.siblingGap
+      return offset
+    })
+    const blockWidth = cursor - options.siblingGap
+
+    // 将子节点块整体平移，使其相对父节点水平居中
+    const shift = (node.width - blockWidth) / 2
+    node.children.forEach((child, i) => {
+      child.x = offsets[i] + shift
+      child.y = node.height + options.levelGap
+    })
+
+    // 子树内容范围 = 节点自身与子节点块的并集
+    return {
+      left: Math.min(0, shift),
+      right: Math.max(node.width, shift + blockWidth),
+    }
+  }
+
+  // 横向布局（left/right）：递归布局子树，返回子树内容相对节点顶部的纵向范围 [top, bottom]（top 可为负）
   function visit(node: Node): { top: number; bottom: number } {
     // 折叠节点视作叶子：子树不参与布局（保持原位，由可见性联动隐藏）
     if (node.collapsed || node.children.length === 0) {
@@ -44,7 +80,8 @@ export function layout<T extends Node>(
     }
   }
 
-  visit(root)
+  if (options.direction === 'down') visitDown(root)
+  else visit(root)
 
   return root
 }

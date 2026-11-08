@@ -5,10 +5,12 @@ import type { Node } from "@silker/core"
 // 插件（install 时自注册），第三方布局插件按能力键注册同名能力覆盖官方实现
 // （App.provide 替换 + uninstall 恢复），不与官方插件互相依赖
 
-// 布局参数：direction 为布局方向（left 从右往左 / right 从左往左），
-// levelGap 为父子水平间距，siblingGap 为兄弟垂直间距
+// 布局参数：direction 为布局方向（left 从右往左 / right 从左往左 / down 自上而下，
+// down 即组织结构图：子节点在父节点下方水平排列），
+// levelGap 为父子间距（横向布局为水平间距，纵向布局为垂直间距），
+// siblingGap 为兄弟间距（横向布局为垂直间距，纵向布局为水平间距）
 export interface AutoLayoutOptions {
-  direction: "left" | "right"
+  direction: "left" | "right" | "down"
   levelGap: number
   siblingGap: number
 }

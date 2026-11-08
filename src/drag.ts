@@ -366,10 +366,12 @@ export class DragInteractions {
   async commitDrop(nodes: Text[], target: Text | null) {
     // 拖拽会话结束：停止边缘自动平移
     this.edgePan.stop();
-    // 拖拽合集垂直中点：决定在目标子节点列表中的插入位置（清空反馈层前先定格）
-    const dropY = this.deps.ghost.floatBox
-      ? this.deps.ghost.floatBox.y + this.deps.ghost.floatBox.h / 2
-      : Infinity;
+    // 拖拽合集中心点：决定在目标子节点列表中的插入位置（横向按 y、纵向按 x 排序，
+    // 清空反馈层前先定格；无合集盒时兜底 Infinity 追加到末尾）
+    const f = this.deps.ghost.floatBox;
+    const dropPoint = f
+      ? { x: f.x + f.w / 2, y: f.y + f.h / 2 }
+      : { x: Infinity, y: Infinity };
     // 恢复文字颜色与高亮环样式，清空拖拽反馈层
     this.dragFills.forEach((fill, n) => (n.fill = fill));
     this.dragFills.clear();
@@ -411,8 +413,8 @@ export class DragInteractions {
         const old = n.parent as Text;
         // 原父级也在被拖子树内（多选时父子同选）：保持原父子结构，跟随父级一起挂载
         if (subtree.has(old)) continue;
-        // 基于落点垂直位置插入到目标子节点列表的对应位置，而非一律追加到最后
-        let newIndex = insertIndex.get(parent) ?? dropIndex(parent, dropY);
+        // 基于落点中心位置插入到目标子节点列表的对应位置，而非一律追加到最后
+        let newIndex = insertIndex.get(parent) ?? dropIndex(parent, dropPoint, this.deps.direction);
         insertIndex.set(parent, newIndex + 1);
         // 同父移动：落点序号按原布局含自身统计，落在原位置之后时需扣掉自身；
         // 扣除后与原位置相同则确实无变化，跳过

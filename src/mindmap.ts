@@ -167,15 +167,17 @@ export class MindMap {
     this.sel = sel;
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight();
-    // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换
+    // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换，
+    // 纵向布局（down）落点连线走垂直方向
     this.ghost = new DragGhost();
     this.ghost.mirror = this.direction === "left";
+    this.ghost.vertical = this.direction === "down";
     // 折叠开关覆盖层（绘制在拖拽反馈层之上、框选矩形之下），开关项渲染时实时枚举
     this.collapseToggle = new CollapseToggle();
     this.collapseToggle.items = () => this.collapse.items();
 
     // ---- 场景模块装配（插件之后、初始数据 init 之前；highlight/ghost/collapseToggle 注入各 controller）----
-    this.model = new MindTree({ levelStyles, edgeStyle });
+    this.model = new MindTree({ levelStyles, edgeStyle, direction: this.direction });
     this.activation = new ActivationController({
       app: this.app,
       editor: this.editor,

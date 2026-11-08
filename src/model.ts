@@ -20,14 +20,25 @@ export class MindTree {
   readonly customStyles = new WeakMap<Text, Style>();
   // 连线样式（构造时从 options 记录）
   private edgeStyle: EdgeShape;
+  // 布局方向（构造时从 options 记录）：down 时父子连线为纵向（父底缘连子顶缘）
+  private direction: "left" | "right" | "down";
 
-  constructor(options: { levelStyles: Style[]; edgeStyle: EdgeShape }) {
+  constructor(options: {
+    levelStyles: Style[];
+    edgeStyle: EdgeShape;
+    direction?: "left" | "right" | "down";
+  }) {
     this.levelStyles = options.levelStyles;
     this.edgeStyle = options.edgeStyle;
+    this.direction = options.direction ?? "left";
   }
 
-  // 按连线样式创建父子连线（统一入口，三处创建点共用）
+  // 按连线样式创建父子连线（统一入口，三处创建点共用）；纵向布局（down）创建垂直连线
   createEdge(from: Text, to: Text): MindEdge {
+    if (this.direction === "down") {
+      if (this.edgeStyle === "bezier") return new MindMapEdge(from, to, true);
+      return new MindPathEdge(from, to, this.edgeStyle, true);
+    }
     if (this.edgeStyle === "bezier") return new MindMapEdge(from, to);
     return new MindPathEdge(from, to, this.edgeStyle);
   }

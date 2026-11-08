@@ -27,8 +27,14 @@ const f = (x: number, y: number, width = 100, height = 40): FT => {
 };
 
 // 构造 KeyboardNav：items 为选集，all 为模型收集到的全部节点（collectTexts stub 返回），
-// activated 记录 activate 调用（导航结果断言用）
-const build = (items: FT[], root: FT | null, all: FT[], activated: FT[]) => {
+// activated 记录 activate 调用（导航结果断言用）；direction 缺省 'right'
+const build = (
+  items: FT[],
+  root: FT | null,
+  all: FT[],
+  activated: FT[],
+  direction: "left" | "right" | "down" = "right",
+) => {
   const deps = {
     model: {
       root: root as unknown as Text | null,
@@ -37,7 +43,7 @@ const build = (items: FT[], root: FT | null, all: FT[], activated: FT[]) => {
       },
     },
     sel: { items: items as unknown as Text[] },
-    direction: "right" as const,
+    direction,
     activation: {
       // 单选派生：与 ActivationController.active 同语义
       active: items.length === 1 ? (items[0] as unknown as Text) : null,
@@ -132,5 +138,75 @@ describe("navigateVertical 垂直导航评分", () => {
     const nav = build([cur], cur, [cur, up, farther], activated);
     navigateVertical(nav, "ArrowUp", cur);
     expect(activated).toEqual([up]);
+  });
+});
+
+// 纵向布局（down）的方向键导航：层级与兄弟轴互换——↑↓ 走层级，←→ 走水平兄弟
+describe("direction 'down' 层级导航", () => {
+  it("ArrowDown 进入首子节点", () => {
+    const root = f(0, 0);
+    const c1 = f(0, 100);
+    const c2 = f(200, 100);
+    (root as unknown as { _children: FT[] })._children = [c1, c2];
+    c1.parent = root as unknown as FT;
+    c2.parent = root as unknown as FT;
+    const activated: FT[] = [];
+    const nav = build([root], root, [root, c1, c2], activated, "down");
+    nav.navigate("ArrowDown");
+    expect(activated).toEqual([c1]);
+  });
+
+  it("ArrowUp 回父节点", () => {
+    const root = f(0, 0);
+    const c1 = f(0, 100);
+    c1.parent = root as unknown as FT;
+    const activated: FT[] = [];
+    const nav = build([c1], root, [root, c1], activated, "down");
+    nav.navigate("ArrowUp");
+    expect(activated).toEqual([root]);
+  });
+});
+
+describe("navigateHorizontal 水平导航评分（direction 'down' 用）", () => {
+  // navigateHorizontal 为私有方法，测试经类型断言直调
+  const navigateHorizontal = (
+    nav: KeyboardNav,
+    key: "ArrowLeft" | "ArrowRight",
+    current: FT,
+  ) =>
+    (
+      nav as unknown as {
+        navigateHorizontal: (k: "ArrowLeft" | "ArrowRight", c: Text) => void;
+      }
+    ).navigateHorizontal(key, current as unknown as Text);
+
+  it("优先取正右方（垂直区间重叠）且水平距离最近者", () => {
+    const cur = f(100, 100);
+    const a = f(200, 100); // 正右，dx = 100
+    const b = f(400, 100); // 正右，dx = 300
+    const activated: FT[] = [];
+    const nav = build([cur], cur, [cur, a, b], activated, "down");
+    navigateHorizontal(nav, "ArrowRight", cur);
+    expect(activated).toEqual([a]);
+  });
+
+  it("无垂直重叠时按斜向矩形间距（dx + dy）最近者", () => {
+    const cur = f(100, 100);
+    const near = f(150, 130); // dx = 0，dy = 10 → 10
+    const far = f(140, 400); // dx = -10，dy = 260 → 270
+    const activated: FT[] = [];
+    const nav = build([cur], cur, [cur, near, far], activated, "down");
+    navigateHorizontal(nav, "ArrowRight", cur);
+    expect(activated).toEqual([near]);
+  });
+
+  it("左侧导航（ArrowLeft）取正左方最近者", () => {
+    const cur = f(300, 100);
+    const a = f(100, 100); // 正左，dx = 200
+    const b = f(0, 100); // 正左，dx = 300
+    const activated: FT[] = [];
+    const nav = build([cur], cur, [cur, a, b], activated, "down");
+    navigateHorizontal(nav, "ArrowLeft", cur);
+    expect(activated).toEqual([a]);
   });
 });

@@ -59,7 +59,8 @@
       z-index: 10;
     }
 
-    #toolbar button {
+    #toolbar button,
+    #toolbar select {
       padding: 6px 14px;
       font-size: 14px;
       border: 1px solid #d1d5db;
@@ -81,6 +82,11 @@
   <!-- <textarea name="" id="text2"></textarea> -->
   <canvas id="canvas"></canvas>
   <div id="toolbar">
+    <select id="direction-select">
+      <option value="right">横向思维导图</option>
+      <option value="left">左向思维导图</option>
+      <option value="down">组织结构图</option>
+    </select>
     <button id="undo-btn" disabled>撤销</button>
     <button id="redo-btn" disabled>重做</button>
     <button id="export-btn">导出图片</button>
