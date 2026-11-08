@@ -324,7 +324,7 @@ export class MindMap {
       levelGap: 80,
       siblingGap: 20,
     });
-    this.pan!.fit(this.model.getBounds(root));
+    this.pan!.center(this.model.getBounds(root));
     // destroy 可能先于异步布局完成：已拆卸则不再挂载任何节点
     if (this.destroyed) return;
     this.app.add(root);

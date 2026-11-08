@@ -63,98 +63,98 @@ const levelStyles: Style[] = [
 const data = {
   text: "中心主题",
   children: [
-    {
-      text: "前端",
-      children: [
-        {
-          text: "框架",
-          children: [
-            { text: "React", children: [] },
-            { text: "Vue", children: [] },
-            { text: "Svelte", children: [] },
-          ],
-        },
-        {
-          text: "构建工具",
-          children: [
-            { text: "Vite", children: [] },
-            { text: "Webpack", children: [] },
-          ],
-        },
-        {
-          text: "样式方案",
-          children: [
-            { text: "Tailwind", children: [] },
-            { text: "CSS Modules", children: [] },
-          ],
-        },
-      ],
-    },
-    {
-      text: "后端",
-      children: [
-        {
-          text: "Node.js",
-          children: [
-            { text: "Express", children: [] },
-            { text: "NestJS", children: [] },
-          ],
-        },
-        {
-          text: "数据库",
-          children: [
-            { text: "MySQL", children: [] },
-            { text: "PostgreSQL", children: [] },
-            { text: "Redis", children: [] },
-          ],
-        },
-        {
-          text: "API 设计",
-          children: [
-            { text: "REST", children: [] },
-            { text: "GraphQL", children: [] },
-          ],
-        },
-      ],
-    },
-    {
-      text: "运维",
-      children: [
-        {
-          text: "容器化",
-          children: [
-            { text: "Docker", children: [] },
-            { text: "K8s", children: [] },
-          ],
-        },
-        {
-          text: "CI/CD",
-          children: [
-            { text: "GitHub Actions", children: [] },
-            { text: "Jenkins", children: [] },
-          ],
-        },
-      ],
-    },
-    {
-      text: "测试",
-      children: [
-        {
-          text: "单元测试",
-          children: [
-            { text: "Vitest", children: [] },
-            { text: "Jest", children: [] },
-          ],
-        },
-        {
-          text: "E2E 测试",
-          children: [
-            { text: "Playwright", children: [] },
-            { text: "Cypress", children: [] },
-          ],
-        },
-      ],
-    },
+    // {
+    //   text: "前端",
+    //   children: [
+    //     {
+    //       text: "框架",
+    //       children: [
+    //         { text: "React", children: [] },
+    //         { text: "Vue", children: [] },
+    //         { text: "Svelte", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "构建工具",
+    //       children: [
+    //         { text: "Vite", children: [] },
+    //         { text: "Webpack", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "样式方案",
+    //       children: [
+    //         { text: "Tailwind", children: [] },
+    //         { text: "CSS Modules", children: [] },
+    //       ],
+    //     },
+    //   ],
+    // },
+    // {
+    //   text: "后端",
+    //   children: [
+    //     {
+    //       text: "Node.js",
+    //       children: [
+    //         { text: "Express", children: [] },
+    //         { text: "NestJS", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "数据库",
+    //       children: [
+    //         { text: "MySQL", children: [] },
+    //         { text: "PostgreSQL", children: [] },
+    //         { text: "Redis", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "API 设计",
+    //       children: [
+    //         { text: "REST", children: [] },
+    //         { text: "GraphQL", children: [] },
+    //       ],
+    //     },
+    //   ],
+    // },
+    // {
+    //   text: "运维",
+    //   children: [
+    //     {
+    //       text: "容器化",
+    //       children: [
+    //         { text: "Docker", children: [] },
+    //         { text: "K8s", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "CI/CD",
+    //       children: [
+    //         { text: "GitHub Actions", children: [] },
+    //         { text: "Jenkins", children: [] },
+    //       ],
+    //     },
+    //   ],
+    // },
+    // {
+    //   text: "测试",
+    //   children: [
+    //     {
+    //       text: "单元测试",
+    //       children: [
+    //         { text: "Vitest", children: [] },
+    //         { text: "Jest", children: [] },
+    //       ],
+    //     },
+    //     {
+    //       text: "E2E 测试",
+    //       children: [
+    //         { text: "Playwright", children: [] },
+    //         { text: "Cypress", children: [] },
+    //       ],
+    //     },
+    //   ],
+    // },
   ],
 };
 
