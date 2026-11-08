@@ -56,6 +56,9 @@ export class DragInteractions {
   pressOnActive = false;
   // 覆盖层上的按下位置（未建立拖拽上下文时用，如根节点）：mouseup 按位移区分点击与拖动
   overlayDown: { x: number; y: number } | null = null;
+  // 根节点按下暂存的平移起点：位移超阈值才真正 beginPan 并切换光标，
+  // 按下瞬间不改样式，避免点击激活/编辑时光标闪烁
+  pendingPan: { x: number; y: number } | null = null;
   // 拖拽合集虚影：克隆首个被拖节点样式，半透明跟随鼠标
   dragChip: Text | null = null;
   // 拖拽中原位节点文字的原始颜色（拖拽期间转暗色，结束后恢复）
@@ -96,9 +99,10 @@ export class DragInteractions {
         if (hit && this.deps.sel.has(hit)) {
           this.overlayDown = { x: e.clientX, y: e.clientY };
         }
-        // 根节点不可拖拽：按下改为经视口能力平移画布，不进入框选
+        // 根节点不可拖拽：按下仅暂存平移起点，位移超阈值后才经视口能力开始平移
+        // （beginPan 会切换 grabbing 光标，提前切换会让点击激活/编辑出现光标闪烁）
         if (hit === this.deps.model.root) {
-          this.deps.pan?.beginPan(e);
+          this.pendingPan = { x: e.clientX, y: e.clientY };
           return;
         }
         // 空白按下：框选会话由选中插件接管（橡皮筋 + 松手落定多选）
@@ -119,6 +123,20 @@ export class DragInteractions {
       },
       onCanvasLeave: () => this.deps.collapse.onLeave(),
       onWindowMove: (e) => {
+        // 根节点按下的延迟平移：位移超过阈值才真正开始平移（同时切换 grabbing 光标），
+        // 阈值与节点拖拽一致；beginPan 以当前事件为起点，阈值内的微小位移不计入
+        if (this.pendingPan) {
+          if (
+            Math.hypot(
+              e.clientX - this.pendingPan.x,
+              e.clientY - this.pendingPan.y,
+            ) <= 3
+          )
+            return;
+          this.pendingPan = null;
+          this.deps.pan?.beginPan(e);
+          return;
+        }
         const drag = this.dragState;
         if (!drag) return;
         // 位移超过阈值才算拖拽，普通点击不触发
@@ -165,6 +183,8 @@ export class DragInteractions {
         this.updateDrag(e);
       },
       onWindowUp: (e) => {
+        // 根节点按下未达到平移阈值即松手：清掉暂存的平移起点，交给点击编辑判定
+        this.pendingPan = null;
         const drag = this.dragState;
         if (drag) {
           this.dragState = null;
