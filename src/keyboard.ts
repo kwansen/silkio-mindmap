@@ -19,6 +19,11 @@ export interface KeyboardNavDeps {
 export class KeyboardNav {
   constructor(private deps: KeyboardNavDeps) {}
 
+  // 切换布局方向：导航语义（层级/垂直轴互换）按新方向动态计算（navigate 运行时读取）
+  setDirection(direction: LayoutDirection) {
+    this.deps.direction = direction;
+  }
+
   // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   onGlobalKeydown = (e: KeyboardEvent) => {

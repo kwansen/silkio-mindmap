@@ -293,6 +293,21 @@ export class MindMap {
     return this.model.toJSON();
   }
 
+  // 切换布局方向（数据与场景实例保持不动）：同步更新门面/模型/各控制器的方向状态与
+  // 拖拽反馈层朝向，翻转既有连线纵向标志后整体重布局并居中视口
+  async toggleLayout(direction: LayoutDirection) {
+    if (!this.model.root || !this.pan) return;
+    this.direction = direction;
+    this.model.setDirection(direction);
+    this.ghost.mirror = direction === "left";
+    this.ghost.vertical = direction === "down";
+    this.collapse.setDirection(direction);
+    this.keyboard.setDirection(direction);
+    this.drag.setDirection(direction);
+    await this.relayout();
+    this.pan.center(this.model.getBounds(this.model.root));
+  }
+
   // 导出历史栈为可序列化快照（撤销栈在先、重做栈在后）：栈内含不可序列化命令
   // （如三方闭包命令）时返回 null，拒绝部分导出
   exportHistory(): HistorySnapshot | null {

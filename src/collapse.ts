@@ -27,6 +27,11 @@ export class CollapseController {
 
   constructor(private deps: CollapseDeps) {}
 
+  // 切换布局方向：开关位置与悬浮区域按新方向动态计算（togglePoints/toggleHoverRect 运行时读取）
+  setDirection(direction: LayoutDirection) {
+    this.deps.direction = direction;
+  }
+
   // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外
   // （横向布局在左/右缘，纵向布局在底缘）。折叠态（+）常显；展开态（−）仅鼠标悬浮
   // 该节点时显示（拖拽/框选中一律隐藏）。双向布局（both）根节点两侧均有子节点，

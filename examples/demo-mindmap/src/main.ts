@@ -190,7 +190,7 @@ const edgeStyle: "bezier" | "path" | "zBezier" | "rPath" = "rPath";
 
 // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
 // MindMap 按能力键复用这些能力，只补齐自有的布局插件。
-// App 与官方插件在布局切换时复用，MindMap 场景实例按方向重建（destroy 对称拆卸）
+// App 与官方插件在布局切换时复用，MindMap 场景实例内经 toggleLayout 原地切换方向
 const app = new App(canvas);
 for (const p of officialPlugins()) app.use(p);
 
@@ -207,9 +207,8 @@ const refreshToolbar = () => {
   redoBtn.disabled = !mindmap.canRedo;
 };
 
-// 按布局方向创建 MindMap 场景实例（切换布局时销毁旧实例重建，宿主 App 不动）
+// 创建 MindMap 场景实例（布局切换走 toggleLayout，实例与数据保持不动）
 function createMindmap(direction: "left" | "right" | "down" | "both") {
-  mindmap?.destroy();
   mindmap = new MindMap({
     app,
     data,
@@ -226,8 +225,9 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
 }
 
 // 布局方向切换：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
+// 同一实例原地切换：数据、选中态、撤销栈均保留
 directionSelect.addEventListener("change", () => {
-  createMindmap(directionSelect.value as "left" | "right" | "down" | "both");
+  void mindmap.toggleLayout(directionSelect.value as "left" | "right" | "down" | "both");
 });
 createMindmap("right");
 

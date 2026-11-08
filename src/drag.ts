@@ -75,6 +75,11 @@ export class DragInteractions {
     this.edgePan = new EdgePan(deps.app, (x, y) => this.updateDrag({ clientX: x, clientY: y }));
   }
 
+  // 切换布局方向：落点判定（横向/纵向分支）按新方向动态计算（dropTarget/dropIndex 运行时读取）
+  setDirection(direction: LayoutDirection) {
+    this.deps.direction = direction;
+  }
+
   // 左键交互（框选 + 拖拽换父）：
   // 按下命中已选中节点 → 拖拽上下文，超阈值后整组选中子树跟随移动，松手落点有效则换父；
   // 按下空白或未选中节点 → 框选上下文，超阈值显示选框，松手批量激活相交节点；

@@ -3,7 +3,7 @@ import type { EdgeShape } from "@silker/core";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";
 import { defaultStyle } from "./types";
-import type { MindMapNode, Style } from "./types";
+import type { LayoutDirection, MindMapNode, Style } from "./types";
 
 // 思维导图数据模型：持有节点树与连线集合，负责建模（数据 → Text 树）、级数样式解析、
 // 折叠可见性联动与序列化导出。只做模型维护，不涉及交互与覆盖层（各 controller 单向依赖本模块）
@@ -32,6 +32,14 @@ export class MindTree {
     this.levelStyles = options.levelStyles;
     this.edgeStyle = options.edgeStyle;
     this.direction = options.direction ?? "left";
+  }
+
+  // 切换布局方向：更新自有方向状态并翻转既有连线的纵向标志（连线类别只由 edgeStyle
+  // 决定，横向/纵向渲染由 vertical 标志在渲染时动态分支，无需重建连线对象）
+  setDirection(direction: LayoutDirection) {
+    this.direction = direction;
+    const vertical = direction === "down";
+    this.edges.forEach((e) => (e.vertical = vertical));
   }
 
   // 按连线样式创建父子连线（统一入口，三处创建点共用）；纵向布局（down）创建垂直连线
