@@ -230,8 +230,6 @@ export class MindMap {
     this.cleanups.push(this.drag.bind());
     // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
-    // 拖拽到画布边缘时自动平移视口（rAF 常驻循环，非拖拽时空转）
-    requestAnimationFrame(this.drag.edgePanLoop);
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
     void this.init(options.data);
   }
@@ -331,7 +329,7 @@ export class MindMap {
   }
 
   // 完整拆卸（幂等，页面级销毁或显式装配下重建场景用）：
-  // 1) 撤销指针监听并停止边缘平移 rAF 循环；
+  // 1) 撤销指针监听；
   // 2) 复位接线在宿主插件上的场景回调（编辑器/选中/空白点击可能为显式装配的
   //    宿主所有，避免已销毁门面被插件回调持有），并结束进行中的编辑会话；
   // 3) 注销场景命令（键位随命令一并移除）并复位分发守卫；
@@ -343,7 +341,6 @@ export class MindMap {
     this.destroyed = true;
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
-    this.drag.stopEdgePanLoop();
     this.editor.onInput = undefined;
     this.editor.onEditStart = undefined;
     this.editor.onActivate = undefined;

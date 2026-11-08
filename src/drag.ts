@@ -1,4 +1,4 @@
-import { App, Text } from "@silker/core";
+import { App, EdgePan, Text } from "@silker/core";
 import type { Node } from "@silker/core";
 import type { ViewportCapability } from "@silker/core";
 import type { HistoryCapability, HistoryCommand } from "@silker/core";
@@ -64,8 +64,13 @@ export class DragInteractions {
   // 真实鼠标 move 可达 125Hz+，逐事件执行会打满主线程饿死 rAF（拖拽冻结、松手瞬移）
   private hoverFrame = 0;
   private pendingHover: { x: number; y: number } | null = null;
+  // 边缘自动平移（core 机制）：拖拽中指针贴近画布边缘时持续平移视口，每次平移
+  // 后重算虚影/落点跟随（core 已负责相机-only 呈现，这里只重算跟随物）
+  private edgePan: EdgePan;
 
-  constructor(private deps: DragDeps) {}
+  constructor(private deps: DragDeps) {
+    this.edgePan = new EdgePan(deps.app, (x, y) => this.updateDrag({ clientX: x, clientY: y }));
+  }
 
   // 左键交互（框选 + 拖拽换父）：
   // 按下命中已选中节点 → 拖拽上下文，超阈值后整组选中子树跟随移动，松手落点有效则换父；
@@ -155,6 +160,8 @@ export class DragInteractions {
         // 节点本体不再跟随移动，由反馈层代替：合集虚影 = 按下节点原始包围盒 + 拖拽位移
         // （虚影/落点计算在 updateDrag，与边缘自动平移共用）
         drag.lastScreen = { clientX: e.clientX, clientY: e.clientY };
+        // 边缘自动平移：记录指针位置并确保会话循环在跑（首帧即启动，幂等）
+        this.edgePan.start(e.clientX, e.clientY);
         this.updateDrag(e);
       },
       onWindowUp: (e) => {
@@ -281,43 +288,6 @@ export class DragInteractions {
     this.deps.app.requestOverlayRender();
   }
 
-  // 边缘自动平移：拖拽中鼠标贴近画布边缘时持续平移视口（越近越快），松手即停。
-  // 平移改变世界↔屏幕映射，需按 lastScreen 重算虚影位置（无需鼠标再动）
-  edgePanLoop = () => {
-    // stopEdgePanLoop 置位后循环自行退出（场景拆卸用）
-    if (this.panLoopStopped) return;
-    const drag = this.dragState;
-    if (drag && this.dragMoved) {
-      const rect = this.deps.app.canvas.getBoundingClientRect();
-      const zone = 48;
-      const { clientX: x, clientY: y } = drag.lastScreen;
-      const axis = (near: number, far: number) => {
-        // 触顶/触左 → 平移量增大（内容向屏幕下/右移动，露出上/左侧内容）；
-        // 触底/触右 → 平移量减小（内容上/左移，露出下/右侧内容）
-        if (near < zone) return Math.max(4, 12 * (1 - near / zone));
-        if (far < zone) return -Math.max(4, 12 * (1 - far / zone));
-        return 0;
-      };
-      const vx = axis(x - rect.left, rect.right - x);
-      const vy = axis(y - rect.top, rect.bottom - y);
-      if (vx || vy) {
-        const vp = this.deps.app.camera.viewport;
-        this.deps.app.camera.setViewport({ ...vp, x: vp.x + vx, y: vp.y + vy });
-        // 相机-only 路径：内容层从快照差量 blit、天空层重绘，两层同步移动；
-        // updateDrag 再重算虚影/落点（覆盖层走轻量路径，与相机呈现同帧合并）
-        this.deps.app.requestCameraRender();
-        this.updateDrag(drag.lastScreen);
-      }
-    }
-    requestAnimationFrame(this.edgePanLoop);
-  };
-
-  // 停止边缘自动平移的 rAF 常驻循环（场景 destroy 时调用，幂等）
-  private panLoopStopped = false;
-  stopEdgePanLoop() {
-    this.panLoopStopped = true;
-  }
-
   // 世界坐标命中的最上层文本节点（选框/高亮环等辅助节点不参与命中）
   // exclude 为被拖子树：拖动中鼠标点总是压在被拖节点上，需跳过它们取其下方的真实目标
   hitText(
@@ -374,6 +344,8 @@ export class DragInteractions {
   // 落点提交：有效目标时把拖动子树顶层节点挂到目标节点下（换父并换线），随后重布局落定；
   // 无有效目标则仅恢复不透明度并重布局（回到原位，相当于取消）
   async commitDrop(nodes: Text[], target: Text | null) {
+    // 拖拽会话结束：停止边缘自动平移
+    this.edgePan.stop();
     // 拖拽合集垂直中点：决定在目标子节点列表中的插入位置（清空反馈层前先定格）
     const dropY = this.deps.ghost.floatBox
       ? this.deps.ghost.floatBox.y + this.deps.ghost.floatBox.h / 2
