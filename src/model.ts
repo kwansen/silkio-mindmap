@@ -71,7 +71,10 @@ export class MindTree {
     });
   }
 
-  // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）
+  // 收集世界矩形相交的全部文本节点（相交即选中，含部分压线的节点）。
+  // 世界矩阵自根向下传播：每节点只做一次 parentWorld × local 乘法，不逐节点
+  // 重建父链（getWorldPoint 是 O(depth) 矩阵链重建，1200 节点单次命中测试
+  // ~50ms 级；拖框中该函数逐鼠标事件调用，是框选卡顿主因）
   textsInRect(rect: { x: number; y: number; width: number; height: number }): Text[] {
     if (!this.root) return [];
     const left = rect.x;
@@ -79,18 +82,22 @@ export class MindTree {
     const top = rect.y;
     const bottom = rect.y + rect.height;
     const out: Text[] = [];
-    this.collectTexts(this.root, out);
-    return out.filter((n) => {
-      // 折叠隐藏的节点不参与框选
-      if (!n.visible) return false;
-      const p = n.getWorldPoint();
-      return (
+    // 折叠子树整体不可见（applyCollapseVisibility 联动整 subtree），整枝跳过
+    const walk = (n: Text, parentWorld: DOMMatrix) => {
+      if (!n.visible) return;
+      const world = parentWorld.multiply(n.localTransform);
+      const p = world.transformPoint({ x: 0, y: 0 });
+      if (
         p.x < right &&
         p.x + n.width > left &&
         p.y < bottom &&
         p.y + n.height > top
-      );
-    });
+      )
+        out.push(n);
+      n.children.forEach((c) => walk(c as Text, world));
+    };
+    walk(this.root, new DOMMatrix());
+    return out;
   }
 
   // 递归收集子树内全部文本节点（被 textsInRect 与键盘垂直导航共用）

@@ -34,7 +34,7 @@ export interface DragDeps {
   ghost: DragGhost;
   highlight: ActiveHighlight;
   history: Pick<HistoryCapability, "exec">;
-  sel: Pick<SelectionCapability<Text>, "items" | "has" | "beginMarquee">;
+  sel: Pick<SelectionCapability<Text>, "items" | "has" | "beginMarquee" | "marqueeActive">;
   // 视口能力：根节点按下改为经视口能力平移画布
   pan: Pick<ViewportCapability, "beginPan"> | null;
   collapse: Pick<CollapseController, "hit" | "toggle" | "onMove" | "onLeave">;
@@ -101,6 +101,9 @@ export class DragInteractions {
       },
       // 悬浮驱动展开态开关显隐（状态属主为折叠控制器）
       onCanvasMove: (_e, w) => {
+        // 框选会话中跳过悬浮检测：hoverTargets 是 O(n) 矩阵链树遍历，节点多时
+        // 与框选命中叠加会打满每帧预算；橡皮筋期间开关悬浮无交互意义
+        if (this.deps.sel.marqueeActive) return;
         // 合并到每帧最多一次悬浮命中检测，事件只记录最新位置
         this.pendingHover = w;
         if (this.hoverFrame) return;
