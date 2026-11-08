@@ -178,6 +178,9 @@ export class MindMap {
 
     // ---- 场景模块装配（插件之后、初始数据 init 之前；highlight/ghost/collapseToggle 注入各 controller）----
     this.model = new MindTree({ levelStyles, edgeStyle, direction: this.direction });
+    // 拖拽落点连线镜像按目标节点子侧判定（双向布局下左右两侧各自互换，
+    // 单侧布局兜底 mirror 与 model.sideOf 结果一致）
+    this.ghost.sideOf = (n) => this.model.sideOf(n) === "left";
     this.activation = new ActivationController({
       app: this.app,
       editor: this.editor,

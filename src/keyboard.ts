@@ -7,7 +7,7 @@ import type { MindTree } from "./model";
 import type { LayoutDirection } from "./types";
 
 export interface KeyboardNavDeps {
-  model: Pick<MindTree, "root" | "collectTexts">;
+  model: Pick<MindTree, "root" | "collectTexts" | "sideOf">;
   sel: Pick<SelectionCapability<Text>, "items">;
   direction: LayoutDirection;
   activation: Pick<ActivationController, "active" | "activate" | "wake" | "keymapGuard">;
@@ -82,9 +82,12 @@ export class KeyboardNav {
       return;
     }
     const parent = current.parent as Text | null;
-    // direction 'right' 子节点在右侧：Right 进入首子节点，Left 回父节点；direction 'left' 相反
+    // 子节点在当前节点哪一侧（单侧布局全局一致，双向布局按节点与根的相对位置）：
+    // 子在右则 Right 进入首子节点，子在左则 Left 进入；反向键回父节点
     const toChild =
-      this.deps.direction === "right" ? key === "ArrowRight" : key === "ArrowLeft";
+      this.deps.model.sideOf(current) === "right"
+        ? key === "ArrowRight"
+        : key === "ArrowLeft";
     if (toChild) {
       if (!current.children.length) return;
       // 折叠节点进入首子节点前先展开

@@ -11,8 +11,12 @@ export class DragGhost extends Node {
   floatBox: { x: number; y: number; w: number; h: number } | null = null;
   // 候选落点目标节点（连线起点）
   target: Text | null = null;
-  // 布局镜像：从右向左布局（direction 'left'）时连线锚点左右互换
+  // 布局镜像兜底：从右向左布局（direction 'left'）时连线锚点左右互换
+  // （单侧布局用；双向布局由 sideOf 按目标节点逐个判定，设置后忽略本字段）
   mirror = false;
+  // 节点子侧查询（横向布局）：返回 true 表示目标节点的子树在其左侧（连线锚点左右互换）。
+  // 双向布局（both）下目标可在根节点任一侧，由 MindMap 注入 model.sideOf 的结果
+  sideOf: ((n: Text) => boolean) | null = null;
   // 纵向布局（direction 'down'）：落点连线走垂直方向（目标底缘中点 → 合集矩形近端缘中点）
   vertical = false;
   // 落点连线：复用底层 Edge 绘制与思维导图一致的贝塞尔曲线
@@ -46,9 +50,11 @@ export class DragGhost extends Node {
       ctx.restore();
       return;
     }
-    // 横向布局：命中节点边缘垂直中点 → 合集矩形边缘垂直中点，贝塞尔曲线与思维导图连线一致
-    const fromX = this.mirror ? p.x : p.x + this.target.width;
-    const toX = this.mirror ? f.x + f.w : f.x;
+    // 横向布局：命中节点边缘垂直中点 → 合集矩形边缘垂直中点，贝塞尔曲线与思维导图连线一致；
+    // 镜像按目标节点子侧判定（双向布局左右两侧各自互换）
+    const mirror = this.sideOf ? this.sideOf(this.target) : this.mirror;
+    const fromX = mirror ? p.x : p.x + this.target.width;
+    const toX = mirror ? f.x + f.w : f.x;
     this.link.from = { x: fromX, y: p.y + this.target.height / 2 };
     this.link.to = { x: toX, y: f.y + f.h / 2 };
     this.link.lineWidth = 1.5;

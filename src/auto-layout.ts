@@ -6,11 +6,13 @@ import type { Node } from "@silker/core"
 // （App.provide 替换 + uninstall 恢复），不与官方插件互相依赖
 
 // 布局参数：direction 为布局方向（left 从右往左 / right 从左往左 / down 自上而下，
-// down 即组织结构图：子节点在父节点下方水平排列），
+// down 即组织结构图：子节点在父节点下方水平排列；both 双向平衡布局：根节点的
+// 子节点按整体高度等分（保持顺序在累计高度过半处切分，前段在右、后段在左，
+// 切点划分稳定，避免随节点变化整体跳动），各侧子树仍按横向骨架排布），
 // levelGap 为父子间距（横向布局为水平间距，纵向布局为垂直间距），
 // siblingGap 为兄弟间距（横向布局为垂直间距，纵向布局为水平间距）
 export interface AutoLayoutOptions {
-  direction: "left" | "right" | "down"
+  direction: "left" | "right" | "down" | "both"
   levelGap: number
   siblingGap: number
 }

@@ -302,6 +302,8 @@ export class DragInteractions {
       this.deps.ghost.floatBox,
       subtree,
       this.deps.direction,
+      (n) => this.deps.model.sideOf(n),
+      this.deps.model.root,
     );
     this.deps.ghost.target = t;
     // 拖拽反馈（虚影/落点连线）均为覆盖层：轻量路径，不重光栅化场景

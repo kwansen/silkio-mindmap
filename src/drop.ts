@@ -6,10 +6,11 @@ import type { LayoutDirection } from "./types";
 export const DROP_RANGE = 500;
 
 // 落点候选判定（横向布局）：不做鼠标悬浮命中，按几何间距——
-// 从左向右布局（direction 'right'）取合集左缘到左侧节点右缘的间距，
-// 从右向左布局（direction 'left'）镜像取合集右缘到右侧节点左缘的间距；
+// 取合集盒子到候选节点「子侧」边缘的间距（子侧由 sideOf 按节点逐个判定：
+// 单侧布局全局一致，双向布局按节点与根的相对位置）；
 // 间距在 0..DROP_RANGE 内为候选，多个候选取水平间距最小者（同层节点边缘对齐时间距相同，
 // 退而取与合集中心垂直距离最近者）。被拖子树内的节点不作候选。
+// 双向布局的根节点两侧均为子侧：左右两侧的间距取较小者参与竞争。
 // 垂直命中带是节点的「子树纵向跨度」（自身 + 全部后代的 y 区间并集）而非节点自身：
 // 悬浮在目标纵向范围之外（如一级节点下方的空白区）也能命中它；贴着某个后代悬浮时
 // 后代水平间距更小仍优先，故深处节点不会被祖先抢走
@@ -17,9 +18,10 @@ function dropTargetH(
   children: readonly Node[],
   f: { x: number; y: number; w: number; h: number },
   subtree: Set<Node>,
-  direction: "left" | "right",
+  sideOf: (n: Text) => "left" | "right",
+  both: boolean,
+  root: Text | null,
 ): Text | null {
-  const ltr = direction === "right";
   const centerY = f.y + f.h / 2;
   let best: Text | null = null;
   let bestGap = Infinity;
@@ -39,7 +41,15 @@ function dropTargetH(
       const vOverlap =
         Math.min(f.y + f.h, maxY) - Math.max(f.y, minY);
       if (vOverlap > 0) {
-        const gap = ltr ? f.x - (p.x + n.width) : p.x - (f.x + f.w);
+        const isLeft = sideOf(n) === "left";
+        // 子侧间距：拖到节点子侧（右向布局在右、左向布局在左）即成为其子节点
+        const childGap = isLeft ? p.x - (f.x + f.w) : f.x - (p.x + n.width);
+        let gap = childGap;
+        // 双向布局根节点两侧均可放置：另一侧间距有效（≥0）时取两侧较小者
+        if (both && n === root) {
+          const other = isLeft ? f.x - (p.x + n.width) : p.x - (f.x + f.w);
+          if (other >= 0 && (gap < 0 || other < gap)) gap = other;
+        }
         if (gap >= 0 && gap <= DROP_RANGE) {
           const dy = Math.abs(centerY - (p.y + n.height / 2));
           if (gap < bestGap || (gap === bestGap && dy < bestDy)) {
@@ -101,16 +111,26 @@ function dropTargetV(
   return best;
 }
 
-// 落点候选判定：按布局方向分发（横向左右 / 纵向 down 旋转版）
+// 落点候选判定：按布局方向分发（横向左右 / 纵向 down 旋转版）；
+// 横向布局逐节点判定子侧（sideOf），双向布局（both）下两侧节点各自镜像
 export function dropTarget(
   children: readonly Node[],
   floatBox: { x: number; y: number; w: number; h: number } | null,
   subtree: Set<Node>,
   direction: LayoutDirection,
+  sideOf: (n: Text) => "left" | "right",
+  root: Text | null,
 ): Text | null {
   if (!floatBox) return null;
   if (direction === "down") return dropTargetV(children, floatBox, subtree);
-  return dropTargetH(children, floatBox, subtree, direction);
+  return dropTargetH(
+    children,
+    floatBox,
+    subtree,
+    sideOf,
+    direction === "both",
+    root,
+  );
 }
 
 // 落点插入位置（横向布局）：按拖拽合集垂直中点与目标现有子节点的垂直中点比较，

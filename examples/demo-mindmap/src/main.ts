@@ -201,14 +201,14 @@ const directionSelect = document.getElementById(
   "direction-select",
 ) as HTMLSelectElement;
 
-let mindmap: MindMap;
+let mindmap!: MindMap;
 const refreshToolbar = () => {
   undoBtn.disabled = !mindmap.canUndo;
   redoBtn.disabled = !mindmap.canRedo;
 };
 
 // 按布局方向创建 MindMap 场景实例（切换布局时销毁旧实例重建，宿主 App 不动）
-function createMindmap(direction: "left" | "right" | "down") {
+function createMindmap(direction: "left" | "right" | "down" | "both") {
   mindmap?.destroy();
   mindmap = new MindMap({
     app,
@@ -225,9 +225,9 @@ function createMindmap(direction: "left" | "right" | "down") {
   refreshToolbar();
 }
 
-// 布局方向切换：横向思维导图（right）/ 左向思维导图（left）/ 组织结构图（down）
+// 布局方向切换：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
 directionSelect.addEventListener("change", () => {
-  createMindmap(directionSelect.value as "left" | "right" | "down");
+  createMindmap(directionSelect.value as "left" | "right" | "down" | "both");
 });
 createMindmap("right");
 

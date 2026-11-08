@@ -20,13 +20,14 @@ export class MindTree {
   readonly customStyles = new WeakMap<Text, Style>();
   // 连线样式（构造时从 options 记录）
   private edgeStyle: EdgeShape;
-  // 布局方向（构造时从 options 记录）：down 时父子连线为纵向（父底缘连子顶缘）
-  private direction: "left" | "right" | "down";
+  // 布局方向（构造时从 options 记录）：down 时父子连线为纵向（父底缘连子顶缘），
+  // both 时根节点的子树分堆左右两侧（连线仍为横向，锚点按父子相对位置自适应）
+  private direction: "left" | "right" | "down" | "both";
 
   constructor(options: {
     levelStyles: Style[];
     edgeStyle: EdgeShape;
-    direction?: "left" | "right" | "down";
+    direction?: "left" | "right" | "down" | "both";
   }) {
     this.levelStyles = options.levelStyles;
     this.edgeStyle = options.edgeStyle;
@@ -168,6 +169,20 @@ export class MindTree {
       p = p.parent as Text | null;
     }
     return depth;
+  }
+
+  // 节点子侧判定（横向布局语义：子节点在该节点的左/右侧）：
+  // 单侧布局（left/right）全局一致；双向布局（both）按节点与根节点的世界坐标相对
+  // 位置判定——布局把左分子树放在根左侧、右分放在右侧，几何位置即分堆真值，
+  // 交互层（折叠/导航/拖放）据此按节点逐个判定，无需布局回传分堆结果。
+  // 纵向布局（down）与根节点本身返回 'right'（调用方仅在横向语境消费）
+  sideOf(node: Text): "left" | "right" {
+    if (this.direction === "down") return "right";
+    if (this.direction !== "both") return this.direction;
+    if (!this.root || node === this.root) return "right";
+    const rp = this.root.getWorldPoint();
+    const p = node.getWorldPoint();
+    return p.x < rp.x ? "left" : "right";
   }
 
   // 新节点样式解析：配置了级数样式按级数取值，否则沿用参考节点的实际样式（旧行为）

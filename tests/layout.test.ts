@@ -71,6 +71,59 @@ describe("layout 树形布局", () => {
     expect(child.x).toBe(-(80 + 60)); // -(child.width + levelGap)
   });
 
+  it("direction 'both'：根节点子节点按整体高度等分（保持顺序切分）", () => {
+    const root = n(100, 60);
+    const c1 = n(80, 20);
+    const c2 = n(80, 20);
+    const c3 = n(80, 20);
+    root.add(c1);
+    root.add(c2);
+    root.add(c3);
+    layout(root, { ...OPTS, direction: "both" });
+    // 总堆叠高 70，切点比较：k=1 前段 20/后段 40（差 20），k=2 前段 50/后段 10（差 40）
+    // → k=1：c1 在右，c2/c3 在左（保持原有顺序）
+    expect(c1.x).toBe(160); // 右分：parent.width + levelGap
+    expect(c2.x).toBe(-(80 + 60)); // 左分：-(child.width + levelGap)
+    expect(c3.x).toBe(-(80 + 60));
+    // 右侧单节点垂直居中 y=20；左侧块高 50 居中于根（h=60）：c2.y=5、c3.y=35
+    expect(c1.y).toBe(20);
+    expect(c2.y).toBe(5);
+    expect(c3.y).toBe(35);
+  });
+
+  it("direction 'both'：子节点尺寸不影响切点前的成员划分（切点稳定）", () => {
+    const root = n(100, 60);
+    const tall = n(80, 100); // 跨度大
+    const small = n(80, 20);
+    root.add(tall);
+    root.add(small);
+    layout(root, { ...OPTS, direction: "both" });
+    // 两个子节点切点只能 k=1：tall 在右、small 在左
+    expect(tall.x).toBe(160);
+    expect(small.x).toBe(-(80 + 60));
+    expect(small.y).toBe(20);
+  });
+
+  it("direction 'both'：四个等高子节点在过半处切分（2/2）", () => {
+    const root = n(100, 60);
+    const children = [1, 2, 3, 4].map(() => {
+      const c = n(80, 20);
+      root.add(c);
+      return c;
+    });
+    layout(root, { ...OPTS, direction: "both" });
+    // 总堆叠高 110，k=2 前段 50/后段 50（差 0）→ 前 2 个在右、后 2 个在左
+    expect(children[0].x).toBe(160);
+    expect(children[1].x).toBe(160);
+    expect(children[2].x).toBe(-(80 + 60));
+    expect(children[3].x).toBe(-(80 + 60));
+    // 两侧块高均 50，居中偏移 5
+    expect(children[0].y).toBe(5);
+    expect(children[1].y).toBe(35);
+    expect(children[2].y).toBe(5);
+    expect(children[3].y).toBe(35);
+  });
+
   it("折叠节点视为叶子：子节点位置不动", () => {
     const root = n(100, 60);
     root.collapsed = true;
