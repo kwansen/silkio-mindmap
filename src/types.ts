@@ -1,5 +1,6 @@
 import type { App, Plugin } from "@silker/core";
 import type { EdgeShape } from "@silker/core";
+import type { AIEditGenerate } from "./ai";
 
 export interface Style {
   color: string;
@@ -68,9 +69,14 @@ export interface MindMapOptions {
   // 额外装配的插件（在官方布局插件之后、初始数据 init 之前安装）：第三方布局插件
   // 经此注册同名 mindmap.auto-layout 能力覆盖官方实现，初始布局即可生效
   plugins?: Plugin[];
+  // AI 编辑生成适配器（AIEditingPlugin 依赖）：宿主实现——拿到 AIEditRequest
+  // （用户指令 + 带 id 的树快照 + 锚点/选中上下文）后调自家 LLM，返回操作数组
+  // 或其 JSON 字符串。协议与提示词模板见 ai.ts（defaultAIEditPrompt）；
+  // 未配置时 mindmap.ai.run 报"未配置适配器"
+  ai?: AIEditGenerate;
 }
 
-// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换 / 布局方向切换 / 连线样式切换
+// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换 / 布局方向切换 / 连线样式切换 / AI 编辑
 export type MindMapChangeType =
   | "add"
   | "delete"
@@ -78,6 +84,7 @@ export type MindMapChangeType =
   | "text"
   | "collapse"
   | "layout"
-  | "edge";
+  | "edge"
+  | "ai";
 
 export type LayoutDirection = NonNullable<MindMapOptions["direction"]>;

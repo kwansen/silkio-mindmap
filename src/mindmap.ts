@@ -22,6 +22,7 @@ import { createMindmapCodec } from "./history-codec";
 import { CollapseController } from "./collapse";
 import { ActivationController } from "./editing";
 import { NodeOperations } from "./operations";
+import { AIEditingController, AIEditingPlugin } from "./ai";
 import { KeyboardNav } from "./keyboard";
 import { DragInteractions } from "./drag";
 import type {
@@ -68,6 +69,8 @@ export class MindMap {
   private collapse: CollapseController;
   // 节点操作（新建/删除/复制/粘贴，clipboard 属主）
   private operations: NodeOperations;
+  // AI 编辑控制器（AIEditingPlugin 经此提供 mindmap.ai 能力；门面经 ai getter 暴露）
+  private aiController: AIEditingController;
   // 键盘导航（方向键/Tab/Enter/全局按键分发）
   private keyboard: KeyboardNav;
   // 拖拽交互（拖拽换父/框选绑定/边缘自动平移）
@@ -240,6 +243,24 @@ export class MindMap {
     // 左键框选与节点拖拽（含全局按键导航，统一由指针能力绑定）；
     // 指针绑定返回的撤销函数并入 cleanups，destroy 时统一执行
     this.cleanups.push(this.drag.bind());
+    // AI 编辑插件：控制器依赖场景模块（在 operations 之后装配），install 注册
+    // mindmap.ai 能力并留档 scenePlugins（destroy 时随场景对称卸载）
+    this.aiController = new AIEditingController(
+      {
+        app: this.app,
+        model: this.model,
+        history: this.history,
+        editor: this.editor,
+        sel: this.sel,
+        activation: this.activation,
+        onRelayout: () => this.relayout(),
+        emitChange: (type) => this.emitChange(type),
+      },
+      options.ai ?? null,
+    );
+    const aiPlugin = new AIEditingPlugin(this.aiController);
+    this.scenePlugins.push(aiPlugin);
+    this.app.use(aiPlugin);
     // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
@@ -287,6 +308,12 @@ export class MindMap {
 
   get canRedo(): boolean {
     return this.history.canRedo;
+  }
+
+  // AI 编辑能力：run(prompt) 执行一次 AI 编辑（生成适配器经 MindMapOptions.ai 注入）。
+  // 门面直接暴露控制器实例（本场景自有插件，非宿主可替换的外部能力）
+  get ai(): AIEditingController {
+    return this.aiController;
   }
 
   // 导出当前数据树：文本 + 子树 + 节点自定义样式 + 折叠态（级数默认样式不入档，避免与 levelStyles 重复）
