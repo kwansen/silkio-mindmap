@@ -13,6 +13,7 @@ import LayoutDown from "../icons/LayoutDown.vue";
 import EdgeBezier from "../icons/EdgeBezier.vue";
 import EdgePath from "../icons/EdgePath.vue";
 import EdgeRPath from "../icons/EdgeRPath.vue";
+import Export from "../icons/Export.vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
 
@@ -111,6 +112,8 @@ const edge = ref<EdgeShape>("rPath");
 const zoom = ref(100);
 const canUndo = ref(false);
 const canRedo = ref(false);
+// 复制 JSON 成功后的短暂反馈
+const copied = ref(false);
 
 // 布局方向选项：value 同时是触发器图标 data-icon-value 与菜单项值
 const layoutOptions: {
@@ -176,6 +179,46 @@ async function redo() {
   syncToolbar();
 }
 
+// 触发浏览器下载：URL.revokeObjectURL 在 click 同步消费后即可释放
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function copyJson() {
+  navigator.clipboard
+    .writeText(JSON.stringify(mindmap.toJSON(), null, 2))
+    .then(() => {
+      copied.value = true;
+      setTimeout(() => (copied.value = false), 1500);
+    });
+}
+
+function exportJson() {
+  download(
+    new Blob([JSON.stringify(mindmap.toJSON(), null, 2)], {
+      type: "application/json",
+    }),
+    "mindmap.json",
+  );
+}
+
+async function exportImage() {
+  // 白底 PNG：padding/scale 走能力默认值（24 世界像素 / 2x）
+  const blob = await mindmap.toImage({ background: "#ffffff" });
+  download(blob, "mindmap.png");
+}
+
+async function exportImageHd() {
+  // 高清版：默认已是 2x，"2 倍高清" 再翻倍到 4x
+  const blob = await mindmap.toImage({ background: "#ffffff", scale: 4 });
+  download(blob, "mindmap-hd.png");
+}
+
 // 缩放滑块：以画布中心为锚点缩放，范围与滚轮缩放一致（0.2–8）
 function onZoomInput(event: Event) {
   const scale = Number((event.target as HTMLInputElement).value) / 100;
@@ -235,7 +278,7 @@ onMounted(() => {
 
   <!-- 单一胶囊工具条：撤销/重做可点击，其余项悬浮展开选项面板 -->
   <div
-    class="fixed top-4 right-4 z-10 flex items-center gap-0.5 rounded-lg border border-gray-300 bg-white p-1 shadow-[0_1px_4px_rgba(0,0,0,0.08)]"
+    class="fixed top-4 right-4 z-10 flex items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
   >
     <button
       class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
@@ -268,7 +311,7 @@ onMounted(() => {
         />
       </button>
       <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg border border-gray-300 bg-white p-1 shadow-[0_4px_12px_rgba(0,0,0,0.1)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
       >
         <button
           v-for="opt in layoutOptions"
@@ -292,7 +335,7 @@ onMounted(() => {
         <component :is="edgeIcons[edge]" class="block h-4 w-4 shrink-0" />
       </button>
       <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg border border-gray-300 bg-white p-1 shadow-[0_4px_12px_rgba(0,0,0,0.1)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
       >
         <button
           v-for="opt in edgeOptions"
@@ -307,6 +350,44 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
+    <div class="group relative">
+      <button
+        class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+        title="导出"
+      >
+        <Export class="block h-4 w-4 shrink-0" />
+      </button>
+      <div
+        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+      >
+        <button
+          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          @click="copyJson"
+        >
+          {{ copied ? "已复制" : "复制 JSON" }}
+        </button>
+        <button
+          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          @click="exportJson"
+        >
+          导出 JSON
+        </button>
+        <button
+          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          @click="exportImage"
+        >
+          导出图片
+        </button>
+        <button
+          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          @click="exportImageHd"
+        >
+          导出图片（2倍高清）
+        </button>
+      </div>
+    </div>
+
     <!-- 缩放：数字触发器 + 滑块面板 -->
     <div class="group relative">
       <button
@@ -316,15 +397,18 @@ onMounted(() => {
         <span class="text-[11px] tabular-nums">{{ zoom }}</span>
       </button>
       <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.1)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
       >
         <input
-          class="w-35 cursor-pointer"
+          class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
           type="range"
           min="20"
           max="800"
           :value="zoom"
           step="5"
+          :style="{
+            background: `linear-gradient(to right, #374151 ${((zoom - 20) / 780) * 100}%, #e5e7eb 0)`,
+          }"
           @input="onZoomInput"
         />
       </div>
