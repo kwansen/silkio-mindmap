@@ -21,7 +21,7 @@ const levelStyles: Style[] = [
   // 二级样式：分支节点
   {
     color: "#1f2937",
-    backgroundColor: "#C0CAD5",
+    backgroundColor: "#d7dee6ff",
     fontSize: 16,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -108,80 +108,80 @@ const data = {
   //         { text: "Webpack", children: [] },
   //       ],
   //     },
-    //     {
-    //       text: "样式方案",
-    //       children: [
-    //         { text: "Tailwind", children: [] },
-    //         { text: "CSS Modules", children: [] },
-    //       ],
-    //     },
-    //   ],
-    // },
-    // {
-    //   text: "后端",
-    //   children: [
-    //     {
-    //       text: "Node.js",
-    //       children: [
-    //         { text: "Express", children: [] },
-    //         { text: "NestJS", children: [] },
-    //       ],
-    //     },
-    //     {
-    //       text: "数据库",
-    //       children: [
-    //         { text: "MySQL", children: [] },
-    //         { text: "PostgreSQL", children: [] },
-    //         { text: "Redis", children: [] },
-    //       ],
-    //     },
-    //     {
-    //       text: "API 设计",
-    //       children: [
-    //         { text: "REST", children: [] },
-    //         { text: "GraphQL", children: [] },
-    //       ],
-    //     },
-    //   ],
-    // },
-    // {
-    //   text: "运维",
-    //   children: [
-    //     {
-    //       text: "容器化",
-    //       children: [
-    //         { text: "Docker", children: [] },
-    //         { text: "K8s", children: [] },
-    //       ],
-    //     },
-    //     {
-    //       text: "CI/CD",
-    //       children: [
-    //         { text: "GitHub Actions", children: [] },
-    //         { text: "Jenkins", children: [] },
-    //       ],
-    //     },
-    //   ],
-    // },
-    // {
-    //   text: "测试",
-    //   children: [
-    //     {
-    //       text: "单元测试",
-    //       children: [
-    //         { text: "Vitest", children: [] },
-    //         { text: "Jest", children: [] },
-    //       ],
-    //     },
-    //     {
-    //       text: "E2E 测试",
-    //       children: [
-    //         { text: "Playwright", children: [] },
-    //         { text: "Cypress", children: [] },
-    //       ],
-    //     },
-    //   ],
-    // },
+  //     {
+  //       text: "样式方案",
+  //       children: [
+  //         { text: "Tailwind", children: [] },
+  //         { text: "CSS Modules", children: [] },
+  //       ],
+  //     },
+  //   ],
+  // },
+  // {
+  //   text: "后端",
+  //   children: [
+  //     {
+  //       text: "Node.js",
+  //       children: [
+  //         { text: "Express", children: [] },
+  //         { text: "NestJS", children: [] },
+  //       ],
+  //     },
+  //     {
+  //       text: "数据库",
+  //       children: [
+  //         { text: "MySQL", children: [] },
+  //         { text: "PostgreSQL", children: [] },
+  //         { text: "Redis", children: [] },
+  //       ],
+  //     },
+  //     {
+  //       text: "API 设计",
+  //       children: [
+  //         { text: "REST", children: [] },
+  //         { text: "GraphQL", children: [] },
+  //       ],
+  //     },
+  //   ],
+  // },
+  // {
+  //   text: "运维",
+  //   children: [
+  //     {
+  //       text: "容器化",
+  //       children: [
+  //         { text: "Docker", children: [] },
+  //         { text: "K8s", children: [] },
+  //       ],
+  //     },
+  //     {
+  //       text: "CI/CD",
+  //       children: [
+  //         { text: "GitHub Actions", children: [] },
+  //         { text: "Jenkins", children: [] },
+  //       ],
+  //     },
+  //   ],
+  // },
+  // {
+  //   text: "测试",
+  //   children: [
+  //     {
+  //       text: "单元测试",
+  //       children: [
+  //         { text: "Vitest", children: [] },
+  //         { text: "Jest", children: [] },
+  //       ],
+  //     },
+  //     {
+  //       text: "E2E 测试",
+  //       children: [
+  //         { text: "Playwright", children: [] },
+  //         { text: "Cypress", children: [] },
+  //       ],
+  //     },
+  //   ],
+  // },
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -219,7 +219,10 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
     edgeStyle,
     // 数据变化（新增/删除/移动/文本编辑）时打印当前数据 JSON
     onChange: (type) => {
-      console.log(`[MindMap] ${type}`, JSON.stringify(mindmap.toJSON(), null, 2));
+      console.log(
+        `[MindMap] ${type}`,
+        JSON.stringify(mindmap.toJSON(), null, 2),
+      );
       refreshToolbar();
     },
   });
@@ -229,7 +232,9 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
 // 布局方向设置：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
 // 同一实例原地设置：数据、选中态、撤销栈均保留
 directionSelect.addEventListener("change", () => {
-  void mindmap.setLayout(directionSelect.value as "left" | "right" | "down" | "both");
+  void mindmap.setLayout(
+    directionSelect.value as "left" | "right" | "down" | "both",
+  );
 });
 // 连线形状设置：同一实例原地重建连线，数据、选中态、撤销栈均保留
 edgeSelect.value = edgeStyle;
@@ -245,6 +250,37 @@ undoBtn.addEventListener("click", async () => {
 redoBtn.addEventListener("click", async () => {
   await mindmap.redo();
   refreshToolbar();
+});
+
+// 缩放滑块：拖动以画布中心为锚点缩放，范围与滚轮缩放一致（0.2–8）；
+// 滚轮/插件触发的视口变化经 camera.onViewportChange 回写滑块，双向同步
+const zoomSlider = document.getElementById("zoom-slider") as HTMLInputElement;
+const zoomValue = document.getElementById("zoom-value") as HTMLSpanElement;
+
+const updateZoomUI = (scale: number) => {
+  zoomSlider.value = String(Math.round(scale * 100));
+  zoomValue.textContent = `${Math.round(scale * 100)}%`;
+};
+
+zoomSlider.addEventListener("input", () => {
+  const scale = Number(zoomSlider.value) / 100;
+  const vp = app.camera.viewport;
+  const rect = canvas.getBoundingClientRect();
+  // 画布中心的世界坐标在缩放前后保持不动
+  const wx = (rect.width / 2 - vp.x) / vp.scale;
+  const wy = (rect.height / 2 - vp.y) / vp.scale;
+  app.camera.setViewport({
+    x: rect.width / 2 - wx * scale,
+    y: rect.height / 2 - wy * scale,
+    scale,
+  });
+  // setViewport 只更新相机状态，需显式触发相机-only 重渲染（与滚轮缩放一致）
+  app.requestCameraRender();
+});
+
+// 滚轮等外部视口变化 → 同步滑块与百分比显示
+app.camera.onViewportChange(() => {
+  updateZoomUI(app.camera.scale);
 });
 
 // 导出图片：整棵树离屏渲染为 PNG 并触发下载
