@@ -294,13 +294,13 @@ export class MindMap {
     return this.model.toJSON();
   }
 
-  // 切换布局方向（数据与场景实例保持不动）：同步更新门面/模型/各控制器的方向状态与
+  // 设置布局方向（数据与场景实例保持不动）：同步更新门面/模型/各控制器的方向状态与
   // 拖拽反馈层朝向，翻转既有连线纵向标志后整体重布局。根节点锚定语义：布局器只写
   // 子节点相对坐标、从不移动根节点，这里也不调整视口——根节点在屏幕上的位置保持
   // 原地不动，子树绕其重排（不整体居中，避免画面跳动）。
-  // 方向切换记入历史（变更已发生故 record 而非 exec）：undo/redo 由 applyDirection
+  // 方向设置记入历史（变更已发生故 record 而非 exec）：undo/redo 由 applyDirection
   // 恢复方向状态，重布局由 undo/redo 流程统一执行
-  async toggleLayout(direction: LayoutDirection) {
+  async setLayout(direction: LayoutDirection) {
     if (!this.model.root || !this.pan) return;
     const before = this.direction;
     if (before === direction) return;
@@ -320,7 +320,7 @@ export class MindMap {
   }
 
   // 应用布局方向到门面/模型/各控制器（数据与场景实例不动）：翻转既有连线纵向标志，
-  // 重布局由调用方统一执行（toggleLayout 与历史 undo/redo 共用，undo/redo 后
+  // 重布局由调用方统一执行（setLayout 与历史 undo/redo 共用，undo/redo 后
   // MindMap.undo/redo 的 relayout 按 this.direction 重排）
   private applyDirection(direction: LayoutDirection) {
     this.direction = direction;
@@ -332,11 +332,11 @@ export class MindMap {
     this.drag.setDirection(direction);
   }
 
-  // 切换连线样式（数据与场景实例保持不动）：按新样式重建连线对象并替换场景中的连线层。
+  // 设置连线样式（数据与场景实例保持不动）：按新样式重建连线对象并替换场景中的连线层。
   // 锚点在渲染前刷新（update），无需重布局，仅请求重绘；样式未变化时无操作。
-  // 切换记入历史（变更已发生故 record 而非 exec）：undo/redo 直接换回重建前的
+  // 设置记入历史（变更已发生故 record 而非 exec）：undo/redo 直接换回重建前的
   // 旧连线对象数组（对象引用稳定，无需再走重建），场景同步增删
-  toggleEdge(shape: EdgeShape) {
+  setEdgeStyle(shape: EdgeShape) {
     if (!this.model.root) return;
     const prev = [...this.model.edges];
     const before = this.model.setEdgeStyle(shape);

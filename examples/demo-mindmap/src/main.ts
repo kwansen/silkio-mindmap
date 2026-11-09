@@ -186,12 +186,12 @@ const data = {
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 // 连线样式初始值：'bezier' 纯贝塞尔 S 曲线（默认），'path' Z 字折线，
-// 'zBezier' Z 字贝塞尔，'rPath' 圆角 Z 字折线；运行时经 toggleEdge 原地切换
+// 'zBezier' Z 字贝塞尔，'rPath' 圆角 Z 字折线；运行时经 setEdgeStyle 原地设置
 const edgeStyle: EdgeShape = "rPath";
 
 // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
 // MindMap 按能力键复用这些能力，只补齐自有的布局插件。
-// App 与官方插件在布局切换时复用，MindMap 场景实例内经 toggleLayout 原地切换方向
+// App 与官方插件在布局切换时复用，MindMap 场景实例内经 setLayout 原地设置方向
 const app = new App(canvas);
 for (const p of officialPlugins()) app.use(p);
 
@@ -209,7 +209,7 @@ const refreshToolbar = () => {
   redoBtn.disabled = !mindmap.canRedo;
 };
 
-// 创建 MindMap 场景实例（布局切换走 toggleLayout，实例与数据保持不动）
+// 创建 MindMap 场景实例（布局切换走 setLayout，实例与数据保持不动）
 function createMindmap(direction: "left" | "right" | "down" | "both") {
   mindmap = new MindMap({
     app,
@@ -226,15 +226,15 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
   refreshToolbar();
 }
 
-// 布局方向切换：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
-// 同一实例原地切换：数据、选中态、撤销栈均保留
+// 布局方向设置：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
+// 同一实例原地设置：数据、选中态、撤销栈均保留
 directionSelect.addEventListener("change", () => {
-  void mindmap.toggleLayout(directionSelect.value as "left" | "right" | "down" | "both");
+  void mindmap.setLayout(directionSelect.value as "left" | "right" | "down" | "both");
 });
-// 连线形状切换：同一实例原地重建连线，数据、选中态、撤销栈均保留
+// 连线形状设置：同一实例原地重建连线，数据、选中态、撤销栈均保留
 edgeSelect.value = edgeStyle;
 edgeSelect.addEventListener("change", () => {
-  mindmap.toggleEdge(edgeSelect.value as EdgeShape);
+  mindmap.setEdgeStyle(edgeSelect.value as EdgeShape);
 });
 createMindmap("right");
 
