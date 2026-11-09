@@ -295,7 +295,9 @@ export class MindMap {
   }
 
   // 切换布局方向（数据与场景实例保持不动）：同步更新门面/模型/各控制器的方向状态与
-  // 拖拽反馈层朝向，翻转既有连线纵向标志后整体重布局并居中视口
+  // 拖拽反馈层朝向，翻转既有连线纵向标志后整体重布局。根节点锚定语义：布局器只写
+  // 子节点相对坐标、从不移动根节点，这里也不调整视口——根节点在屏幕上的位置保持
+  // 原地不动，子树绕其重排（不整体居中，避免画面跳动）
   async toggleLayout(direction: LayoutDirection) {
     if (!this.model.root || !this.pan) return;
     this.direction = direction;
@@ -306,7 +308,6 @@ export class MindMap {
     this.keyboard.setDirection(direction);
     this.drag.setDirection(direction);
     await this.relayout();
-    this.pan.center(this.model.getBounds(this.model.root));
   }
 
   // 切换连线样式（数据与场景实例保持不动）：按新样式重建连线对象并替换场景中的连线层。
