@@ -1,18 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "types": ["vite/client"],
-    "allowArbitraryExtensions": true,
-
-    /* Bundler mode */
-    "allowImportingTsExtensions": true,
-    "noEmit": true,
-
-    /* Linting */
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
-  },
-  "include": ["src"]
+  "extends": "astro/tsconfigs/base",
+  "include": [".astro/types.d.ts", "src/**/*"],
+  "exclude": ["dist"]
 }

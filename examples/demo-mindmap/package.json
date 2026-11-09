@@ -4,15 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/vue": "^5.0.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "astro": "^5.0.0",
+    "tailwindcss": "^4.3.5",
+    "vue": "^3.5.0"
   },
   "devDependencies": {
     "@silker/core": "workspace:*",
     "@silker/mindmap": "workspace:*",
     "@silker/preset": "workspace:*",
-    "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "typescript": "~6.0.2"
   }
 }
