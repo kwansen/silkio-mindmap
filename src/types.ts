@@ -63,7 +63,7 @@ export interface MindMapOptions {
   // 供宿主持久化等后续操作；当前数据用 toJSON() 导出
   onChange?: (type: MindMapChangeType) => void;
   // 连线样式：'bezier' 单段贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + Z 字折线接入，
-  // 'zBezier' 父级水平直线引出 + 贝塞尔曲线接入
+  // 'rPath' 同 path 但第二个弯折带圆角
   edgeStyle?: EdgeShape;
   // 额外装配的插件（在官方布局插件之后、初始数据 init 之前安装）：第三方布局插件
   // 经此注册同名 mindmap.auto-layout 能力覆盖官方实现，初始布局即可生效

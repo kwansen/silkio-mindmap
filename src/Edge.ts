@@ -78,7 +78,7 @@ export class MindMapEdge extends BaseEdge {
 
 // 路径样式思维导图连线：横向布局父级锚点先水平直线引出至两锚点水平中点再接入子级锚点；
 // 纵向布局父级锚点先垂直直线引出至两锚点垂直中点再接入子级锚点
-// （横向基于统一 Edge 的 path / zBezier 渲染器，纵向为本文件旋转版渲染器，
+// （横向基于统一 Edge 的 path / rPath 渲染器，纵向为本文件旋转版渲染器，
 // 中点与弯折由渲染器内部计算，只声明终点）
 export class MindPathEdge extends BaseEdge {
   fromNode: Text
@@ -90,7 +90,7 @@ export class MindPathEdge extends BaseEdge {
   constructor(
     from: Text,
     to: Text,
-    shape: "path" | "zBezier" | "rPath" = "path",
+    shape: "path" | "rPath" = "path",
     vertical = false,
   ) {
     super({ color: "#94a3b8", shape })
@@ -127,7 +127,6 @@ export class MindPathEdge extends BaseEdge {
       const to = this.segments[0]?.to
       if (!to) return
       if (this.shape === "path") this.renderVPath(ctx, from, to)
-      else if (this.shape === "zBezier") this.renderVZBezier(ctx, from, to)
       else this.renderVRPath(ctx, from, to)
       return
     }
@@ -148,21 +147,6 @@ export class MindPathEdge extends BaseEdge {
     ctx.lineTo(from.x, my)
     ctx.lineTo(to.x, my)
     ctx.lineTo(to.x, to.y)
-    ctx.stroke()
-  }
-
-  // 纵向 Z 字贝塞尔：父级锚点垂直引出至两点 y 中点，随后贝塞尔曲线接入目标点
-  private renderVZBezier(
-    ctx: CanvasRenderingContext2D,
-    from: { x: number; y: number },
-    to: { x: number; y: number },
-  ) {
-    const my = (from.y + to.y) / 2
-    ctx.strokeStyle = this.color
-    ctx.lineWidth = this.lineWidth
-    ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    ctx.bezierCurveTo(from.x, my, to.x, my, to.x, to.y)
     ctx.stroke()
   }
 
@@ -192,5 +176,5 @@ export class MindPathEdge extends BaseEdge {
   }
 }
 
-// 思维导图连线类型：贝塞尔单段（MindMapEdge）或直线引出接入（MindPathEdge，path / zBezier / rPath）
+// 思维导图连线类型：贝塞尔单段（MindMapEdge）或直线引出接入（MindPathEdge，path / rPath）
 export type MindEdge = MindMapEdge | MindPathEdge

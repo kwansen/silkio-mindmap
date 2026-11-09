@@ -12,7 +12,6 @@ import LayoutBoth from "../icons/LayoutBoth.vue";
 import LayoutDown from "../icons/LayoutDown.vue";
 import EdgeBezier from "../icons/EdgeBezier.vue";
 import EdgePath from "../icons/EdgePath.vue";
-import EdgeZBezier from "../icons/EdgeZBezier.vue";
 import EdgeRPath from "../icons/EdgeRPath.vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
@@ -125,12 +124,10 @@ const layoutOptions: {
   { value: "down", short: "组织结构", title: "组织结构图" },
 ];
 
-// 连线形状选项：'bezier' 纯贝塞尔 S 曲线，'path' Z 字折线，
-// 'zBezier' Z 字贝塞尔，'rPath' 圆角 Z 字折线
+// 连线形状选项：'bezier' 纯贝塞尔 S 曲线，'path' Z 字折线，'rPath' 圆角 Z 字折线
 const edgeOptions: { value: EdgeShape; short: string; title: string }[] = [
   { value: "bezier", short: "贝塞尔", title: "贝塞尔曲线" },
   { value: "path", short: "Z 折线", title: "Z 字折线" },
-  { value: "zBezier", short: "Z 贝塞尔", title: "Z 字贝塞尔" },
   { value: "rPath", short: "圆角折线", title: "圆角折线" },
 ];
 
@@ -145,7 +142,6 @@ const layoutIcons: Record<LayoutDirection, Component> = {
 const edgeIcons: Record<EdgeShape, Component> = {
   bezier: EdgeBezier,
   path: EdgePath,
-  zBezier: EdgeZBezier,
   rPath: EdgeRPath,
 };
 
