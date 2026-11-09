@@ -484,6 +484,9 @@ export class MindMap {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    // 历史栈随场景废弃：栈内命令闭包引用本场景节点/模型，场景销毁后命令失效，
+    // 不清空会让切换文档后的新场景残留旧场景的撤销/重做（且作用于已销毁对象）
+    this.history.clear?.();
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
     this.editor.onInput = undefined;

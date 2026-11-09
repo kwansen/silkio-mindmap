@@ -271,10 +271,13 @@ async function sendAi() {
   aiMessages.value.push({ id: ++aiMsgSeq, role: "user", text: prompt });
   aiPrompt.value = "";
   const replyId = ++aiMsgSeq;
+  const sentDocId = currentId.value;
   aiBusy.value = true;
   aiPending.value = { reasoning: "" };
   try {
     const r = await mindmap.ai.run(prompt, { history });
+    // 等待期间切换/新建了导图：旧文档的回复不落入新对话流
+    if (currentId.value !== sentDocId) return;
     aiMessages.value.push({
       id: replyId,
       role: "assistant",
@@ -283,6 +286,7 @@ async function sendAi() {
       reasoning: aiPending.value?.reasoning || undefined,
     });
   } catch (e) {
+    if (currentId.value !== sentDocId) return;
     aiMessages.value.push({
       id: replyId,
       role: "error",
@@ -292,6 +296,12 @@ async function sendAi() {
     aiBusy.value = false;
     aiPending.value = null;
   }
+}
+
+// 清空 AI 对话流：新建/切换导图时调用，避免旧文档的指令与回答污染新文档的对话
+function clearAiChat() {
+  aiMessages.value = [];
+  aiPending.value = null;
 }
 
 // ---- 文档管理状态（IndexedDB 持久化 + 自动保存）----
@@ -525,6 +535,7 @@ function createNew(initial?: MindMapNode) {
   docName.value = doc.name;
   docCreatedAt = now;
   void putDoc(doc).then(refreshDocs);
+  clearAiChat();
   mountScene(doc.data, doc.direction, doc.edgeStyle);
 }
 
@@ -539,6 +550,7 @@ async function openDoc(id: string) {
   docCreatedAt = doc.createdAt;
   layout.value = doc.direction;
   edge.value = doc.edgeStyle;
+  clearAiChat();
   mountScene(doc.data, doc.direction, doc.edgeStyle);
 }
 
