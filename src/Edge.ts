@@ -111,7 +111,12 @@ export class MindPathEdge extends BaseEdge {
     const b = anchorOf(this.toNode, true)
     const right = a.x <= b.x
     this.from = right ? a : anchorOf(this.fromNode, false)
-    this.segments = [{ to: right ? anchorOf(this.toNode, false) : b }]
+    const to = right ? anchorOf(this.toNode, false) : b
+    this.segments = [{ to }]
+    // 同步刷新 this.to：渲染只读 from + segments，但基类 getBounds 把 to 计入
+    // 包围盒（图片导出按包围盒取景）——不同步会残留旧布局的锚点撑大包围盒，
+    // 导致导出图片内容不居中（如 down 切 both 后内容靠上）
+    this.to = to
   }
 
   // 渲染前刷新锚点再绘制（保证节点移动后连线跟随）；纵向布局按 shape 走纵向渲染器
