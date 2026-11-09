@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 思维导图 Demo：canvas + 胶囊工具条（撤销/重做、布局方向、连线形状、缩放）+
 // 文档切换器（IndexedDB 持久化：新建/打开/自动保存/删除）
-import { onMounted, onUnmounted, ref, type Component } from "vue";
+import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
 import { App, type EdgeShape } from "@silker/core";
 import { officialPlugins } from "@silker/preset";
 import { MindMap, type MindMapNode, type Style } from "@silker/mindmap";
@@ -217,6 +217,14 @@ function onZoomInput(event: Event) {
   // setViewport 只更新相机状态，需显式触发相机-only 重渲染（与滚轮缩放一致）
   app.requestCameraRender();
 }
+
+// 滑块轨道填充：滑块左侧为深色已填充段，右侧为浅色剩余段
+const zoomTrackStyle = computed(() => {
+  const pct = ((zoom.value - 20) / (800 - 20)) * 100;
+  return {
+    background: `linear-gradient(to right, #111827 ${pct}%, #e5e7eb ${pct}%)`,
+  };
+});
 
 // 触发浏览器下载：URL.revokeObjectURL 在 click 同步消费后即可释放
 function download(blob: Blob, filename: string) {
@@ -606,7 +614,8 @@ onUnmounted(() => {
         class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
       >
         <input
-          class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none"
+          class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+          :style="zoomTrackStyle"
           type="range"
           min="20"
           max="800"
