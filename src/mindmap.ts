@@ -1,4 +1,5 @@
 import { App, Text, VIEWPORT_CAPABILITY } from "@silker/core";
+import type { EdgeShape } from "@silker/core";
 import type {
   CommandCapability,
   ExportOptions,
@@ -306,6 +307,17 @@ export class MindMap {
     this.drag.setDirection(direction);
     await this.relayout();
     this.pan.center(this.model.getBounds(this.model.root));
+  }
+
+  // 切换连线样式（数据与场景实例保持不动）：按新样式重建连线对象并替换场景中的连线层。
+  // 锚点在渲染前刷新（update），无需重布局，仅请求重绘；样式未变化时无操作
+  toggleEdge(shape: EdgeShape) {
+    if (!this.model.root) return;
+    const old = [...this.model.edges];
+    if (!this.model.setEdgeStyle(shape)) return;
+    this.app.remove(old);
+    this.app.add(this.model.edges);
+    this.app.requestRender();
   }
 
   // 导出历史栈为可序列化快照（撤销栈在先、重做栈在后）：栈内含不可序列化命令

@@ -42,6 +42,23 @@ export class MindTree {
     this.edges.forEach((e) => (e.vertical = vertical));
   }
 
+  // 切换连线样式：bezier 与 path 系是两个连线类，无法原地改 shape，按新样式重建全部
+  // 连线对象并继承原连线的纵向标志与可见性；edges 数组原地替换（引用持有方无感）。
+  // 样式未变化时返回 false 不做任何事
+  setEdgeStyle(shape: EdgeShape): boolean {
+    if (shape === this.edgeStyle) return false;
+    this.edgeStyle = shape;
+    const next = this.edges.map((e) => {
+      const ne = this.createEdge(e.fromNode, e.toNode);
+      ne.vertical = e.vertical;
+      ne.visible = e.visible;
+      return ne;
+    });
+    this.edges.length = 0;
+    this.edges.push(...next);
+    return true;
+  }
+
   // 按连线样式创建父子连线（统一入口，三处创建点共用）；纵向布局（down）创建垂直连线
   createEdge(from: Text, to: Text): MindEdge {
     if (this.direction === "down") {

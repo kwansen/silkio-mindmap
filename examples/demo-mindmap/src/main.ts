@@ -1,5 +1,5 @@
 // 入口：挂载 canvas 并渲染一张示例思维导图
-import { App } from "@silker/core";
+import { App, type EdgeShape } from "@silker/core";
 import { officialPlugins } from "@silker/preset";
 import { MindMap, type Style } from "@silker/mindmap";
 
@@ -185,8 +185,9 @@ const data = {
 };
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-// 连线样式参数：'bezier' 纯贝塞尔 S 曲线（默认），'path' Z 字折线，'rPath' 圆角 Z 字折线
-const edgeStyle: "bezier" | "path" | "zBezier" | "rPath" = "rPath";
+// 连线样式初始值：'bezier' 纯贝塞尔 S 曲线（默认），'path' Z 字折线，
+// 'zBezier' Z 字贝塞尔，'rPath' 圆角 Z 字折线；运行时经 toggleEdge 原地切换
+const edgeStyle: EdgeShape = "rPath";
 
 // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
 // MindMap 按能力键复用这些能力，只补齐自有的布局插件。
@@ -200,6 +201,7 @@ const redoBtn = document.getElementById("redo-btn") as HTMLButtonElement;
 const directionSelect = document.getElementById(
   "direction-select",
 ) as HTMLSelectElement;
+const edgeSelect = document.getElementById("edge-select") as HTMLSelectElement;
 
 let mindmap!: MindMap;
 const refreshToolbar = () => {
@@ -228,6 +230,11 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
 // 同一实例原地切换：数据、选中态、撤销栈均保留
 directionSelect.addEventListener("change", () => {
   void mindmap.toggleLayout(directionSelect.value as "left" | "right" | "down" | "both");
+});
+// 连线形状切换：同一实例原地重建连线，数据、选中态、撤销栈均保留
+edgeSelect.value = edgeStyle;
+edgeSelect.addEventListener("change", () => {
+  mindmap.toggleEdge(edgeSelect.value as EdgeShape);
 });
 createMindmap("right");
 
