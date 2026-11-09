@@ -4,7 +4,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Component } from "vue";
 import { App, type EdgeShape } from "@silker/core";
 import { officialPlugins } from "@silker/preset";
-import { MindMap, defaultAIEditPrompt, type AIEditGenerate, type AIEditStep, type MindMapNode, type Style } from "@silker/mindmap";
+import { MindMap, defaultAIEditPrompt, type AIEditGenerate, type AIEditStep, type AIEditTurn, type MindMapNode, type Style } from "@silker/mindmap";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import Undo from "../icons/Undo.vue";
 import Redo from "../icons/Redo.vue";
@@ -255,13 +255,26 @@ async function sendAi() {
     aiSettingsOpen.value = true;
     return;
   }
+  // 对话历史（不含本次指令）：从消息流收集用户/助手轮次，随请求传给生成适配器
+  // ——助手轮无回答文本时以反馈链步骤摘要代之，让模型知道上一轮实际做了什么
+  const history: AIEditTurn[] = aiMessages.value
+    .filter((m) => m.role !== "error")
+    .map((m) => ({
+      role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      text:
+        m.text ||
+        (m.steps && m.steps.length
+          ? m.steps.map((s) => s.label).join("；")
+          : ""),
+    }))
+    .filter((t) => t.text);
   aiMessages.value.push({ id: ++aiMsgSeq, role: "user", text: prompt });
   aiPrompt.value = "";
   const replyId = ++aiMsgSeq;
   aiBusy.value = true;
   aiPending.value = { reasoning: "" };
   try {
-    const r = await mindmap.ai.run(prompt);
+    const r = await mindmap.ai.run(prompt, { history });
     aiMessages.value.push({
       id: replyId,
       role: "assistant",
@@ -857,7 +870,7 @@ onUnmounted(() => {
     <!-- 消息流 -->
     <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
       <div v-if="!aiMessages.length && !aiPending" class="mt-10 text-center text-xs leading-5 text-gray-400">
-        输入编辑指令或提问，如：<br />围绕前端展开 / 把测试改为：质量保障 / 这个导图讲了什么
+        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 / 这个导图讲了什么<br />同名节点用路径定位，如 "线性代数/矩阵"
       </div>
 
       <div v-for="m in aiMessages" :key="m.id">

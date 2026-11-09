@@ -52,6 +52,14 @@ export interface AIMindMapDeleteOp {
   target?: string;
 }
 
+// 用完整新导图数据整体替换当前导图（重排/重构/重新生成类指令）：
+// tree 为完整新树数据（根节点 text 必填，children/style/collapsed 递归可选，
+// 节点可沿用原 id 或省略——省略时运行时自动生成），一条操作即一个原子变更
+export interface AIMindMapRenderOp {
+  op: "render";
+  tree: MindMapNode;
+}
+
 // 回答类回复：AI 对提问/咨询的自然语言回答（不修改导图）。
 // LLM 输出 {"op":"answer","text":"..."} 或 {"answer":"..."} 或纯文本均可
 export interface AIMindMapAnswerOp {
@@ -64,6 +72,7 @@ export type AIMindMapOp =
   | AIMindMapEditOp
   | AIMindMapMoveOp
   | AIMindMapDeleteOp
+  | AIMindMapRenderOp
   | AIMindMapAnswerOp;
 
 // 生成适配器的输入：用户指令 + 当前树快照（带 id）+ 锚点/选中上下文。
@@ -75,6 +84,15 @@ export interface AIEditRequest {
   anchorId: string;
   anchorPath?: string;
   selectionIds: string[];
+  // 对话历史（宿主消息流，按时间先后，不含本次 prompt）：多轮上下文，
+  // 生成适配器可自行组装多轮消息，defaultAIEditPrompt 渲染进提示词尾部
+  history: AIEditTurn[];
+}
+
+// 对话流中的一轮：role 限定为用户/助手（宿主侧错误提示、系统层不进入此流）
+export interface AIEditTurn {
+  role: "user" | "assistant";
+  text: string;
 }
 
 // 生成适配器契约：宿主实现（调自家 LLM），返回操作数组或其 JSON 字符串
@@ -86,6 +104,8 @@ export type AIEditGenerate = (
 export interface AIEditRunOptions {
   // 本次操作的锚点节点 id（上下文与缺省 target 参照），缺省用当前激活节点，再退化为根节点
   anchorId?: string;
+  // 对话历史（按时间先后，不含本次指令）：缺省无历史（单轮）
+  history?: AIEditTurn[];
 }
 
 export interface AIEditResult {
@@ -170,17 +190,36 @@ export function matchTargetSegment(nodes: Text[], seg: string): Text | null {
   return hits[nth - 1] ?? null;
 }
 
-// 按斜杠路径定位："线性代数/矩阵" / "线性代数/矩阵[2]/行"——从根逐段下钻
+// 按斜杠路径定位："线性代数/矩阵" / "线性代数/矩阵[2]/行"——从根逐段下钻。
+// nodePath 产出的路径以根文本开头，首段命中根文本时跳过
 export function resolveTargetByPath(root: Text, path: string): Text | null {
   let cur: Text = root;
-  for (const raw of path.split("/")) {
-    const seg = raw.trim();
-    if (!seg) continue;
+  let segs = path
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segs[0] === root.text) segs = segs.slice(1);
+  for (const seg of segs) {
     const next = matchTargetSegment(cur.children as Text[], seg);
     if (!next) return null;
     cur = next;
   }
   return cur;
+}
+
+// 校验并规整 render 的整树数据：每层必须有 text，children 缺省补空数组
+// （LLM 常省略叶子的 children），返回可直接交给 renderNode 的数据树
+export function normalizeRenderTree(data: unknown, no = ""): MindMapNode {
+  const node = data as MindMapNode | null;
+  if (!node || typeof node.text !== "string" || !node.text)
+    throw new Error(`AI render 操作的 tree 节点缺少 text${no}`);
+  return {
+    ...node,
+    text: node.text,
+    children: Array.isArray(node.children)
+      ? node.children.map((c) => normalizeRenderTree(c, no))
+      : [],
+  };
 }
 
 // 校验并规整 LLM 返回（数组 / { ops: [...] } / JSON 字符串），非法即抛错：
@@ -236,6 +275,9 @@ export function normalizeAIOps(raw: AIMindMapOp[] | string): AIMindMapOp[] {
         throw new Error(`AI move 操作的 parent 应为节点 id 或文本或路径${no}`);
       if (op.index !== undefined && typeof op.index !== "number")
         throw new Error(`AI move 操作的 index 应为数字${no}`);
+    } else if (op.op === "render") {
+      if (!op.tree || typeof (op.tree as MindMapNode)?.text !== "string")
+        throw new Error(`AI render 操作缺少完整 tree 数据（根节点须有 text）${no}`);
     } else if (op.op === "answer") {
       if (typeof op.text !== "string" || !op.text)
         throw new Error(`AI answer 操作缺少 text${no}`);
@@ -275,10 +317,16 @@ export function parseAIResponse(
     const answer = ops.find((o): o is AIMindMapAnswerOp => o.op === "answer")?.text;
     return { ops: rest, answer };
   }
-  const obj = data as { ops?: unknown; answer?: unknown } | null;
+  const obj = data as
+    | { ops?: unknown; answer?: unknown; text?: unknown; children?: unknown }
+    | null;
   const answer =
     typeof obj?.answer === "string" && obj.answer ? obj.answer : undefined;
   if (obj?.ops !== undefined) return { ops: normalizeAIOps(obj.ops as AIMindMapOp[]), answer };
+  // 裸树对象（{text, children, ...}）：整体视为 render 重渲染操作——模型对
+  // "重新生成/重排"类指令直接输出新导图 JSON 时无需包装成操作数组
+  if (typeof obj?.text === "string" && Array.isArray(obj?.children))
+    return { ops: [{ op: "render", tree: normalizeRenderTree(data) }] };
   if (answer !== undefined) return { ops: [], answer };
   throw new Error("AI 返回格式错误：应为操作数组或回答文本");
 }
@@ -295,11 +343,23 @@ export function defaultAIEditPrompt(req: AIEditRequest): string {
     '- {"op":"edit","target":"<可选>","text":"<新文本>"} 修改节点文本',
     '- {"op":"move","target":"<可选>","parent":"<新父节点,缺省根节点>","index":<可选位次>} 移动节点子树（换父或同父排序）',
     '- {"op":"delete","target":"<可选>"} 删除节点及其子树（谨慎使用）',
-    "target 定位规则（按优先级）：节点 id（最稳）；路径 \"A/B/C\"（同名节点必用路径）；\"文本[n]\"（第 n 个同名节点，n 从 1 起）；纯文本（仅全局唯一时可用）。",
+    '- {"op":"render","tree":{"text":"...","children":[...]}} 用完整新导图数据整体替换当前导图（重排/重构/重新生成类指令用；小改动请用上述增量操作）。render 之后的操作引用新树中的节点（新树节点可沿用原 id，也可省略 id）',
+    "target 定位规则（按优先级）：节点 id（最稳；下方导图数据中每个节点都带 id，多条操作引用同一节点时必须用 id，不要用文本）；路径 \"A/B/C\"（次选）；\"文本[n]\"（第 n 个同名节点，n 从 1 起）；纯文本（仅全局唯一时可用）。",
     "",
     "执行前先审视结构合理性：若指令会造成明显不当的层级（如把一级主题挂到末级知识点下），先在 answer 里说明问题并给出建议，未经用户确认不要机械执行大范围结构变更。",
     "不要改动指令未涉及的部分。",
     "",
+    // 对话历史：多轮上下文（不含本次指令），取最近若干轮防止提示词膨胀
+    ...(req.history.length
+      ? [
+          "对话历史（按时间先后，最近在前，仅供理解上下文，无需回应其中内容）：",
+          ...req.history
+            .slice(-12)
+            .reverse()
+            .map((t) => `${t.role === "user" ? "用户" : "助手"}：${t.text}`),
+          "",
+        ]
+      : []),
     `用户指令：${req.prompt}`,
     `锚点节点 id：${req.anchorId}`,
     req.anchorPath ? `锚点节点路径：${req.anchorPath}` : "",
@@ -353,6 +413,7 @@ export class AIEditingController {
       anchorId,
       anchorPath: nodePath(anchorNode),
       selectionIds: this.deps.sel.items.map((n) => n.id!).filter(Boolean),
+      history: options.history ?? [],
     };
 
     this.busy = true;
@@ -365,7 +426,10 @@ export class AIEditingController {
     const { ops, answer } = parseAIResponse(raw);
 
     // 编译全部命令成功才应用（exec 前抛错 = 本次 run 无任何副作用）
-    const { commands, created, steps, focus } = this.compile(ops, anchorId);
+    const { commands, created, steps, focus, activate } = this.compile(
+      ops,
+      anchorId,
+    );
     if (!commands.length) return { applied: 0, ops, steps, answer };
     // 清空选中态：AI 可能删除选中节点，先摘除悬空的覆盖层引用
     this.deps.activation.deactivate();
@@ -373,8 +437,10 @@ export class AIEditingController {
     // 新建节点补挂点击激活绑定（splice 挂载不经 app.add 包装，同 paste 纪律）
     created.forEach((n) => this.deps.editor.bind(n));
     await this.deps.onRelayout();
-    // 最后一个新建节点进入激活态，便于继续手动编辑（无新建则保持退出态）
-    if (created.length) this.deps.activation.activate(created[created.length - 1]);
+    // 最后落点进入激活态，便于继续手动编辑（render 整树替换激活新根，
+    // 避免激活到深层叶子；无新建则保持退出态）
+    const activateNode = activate ?? (created.length ? created[created.length - 1] : null);
+    if (activateNode) this.deps.activation.activate(activateNode);
     // 画布居中到最后落点（新建/移动）：AI 变更常发生在视口外，不聚焦会"看不到效果"
     if (focus) this.deps.app.camera.centerOn(focus.x + focus.width / 2, focus.y + focus.height / 2);
     this.deps.emitChange("ai");
@@ -394,6 +460,8 @@ export class AIEditingController {
     steps: AIEditStep[];
     // 最后落点（最后新建/移动的节点）：供 run 聚焦视口
     focus: Text | null;
+    // 指定激活节点（render 整树替换激活新根）；缺省沿用"最后新建节点"规则
+    activate: Text | null;
   } {
     const { model, app } = this.deps;
     const root = model.root!;
@@ -401,14 +469,17 @@ export class AIEditingController {
     const session = new Map<string, Text>();
     // 批内新建（尚未入 model.edges）的连线：delete 的连线清理需覆盖这些
     const pendingEdges: MindEdge[] = [];
-    // 批内已删除目标节点 id：后续操作引用即编译失败
-    const deleted = new Set<string>();
+    // 批内已删除目标节点 id → 删除发生的操作序号（"第 N 项"）：delete 引用已删
+    // 子树内节点时记为跳过（子树已随前者一并删除），其余操作引用即编译失败
+    const deleted = new Map<string, string>();
     const commands: HistoryCommand[] = [];
     const created: Text[] = [];
     // 逐步执行反馈链：宿主可直接展示，便于定位"编辑看不到效果"类问题
     const steps: AIEditStep[] = [];
     // 最后落点（新建/移动）：run 据此居中视口
     let focus: Text | null = null;
+    // 指定激活节点（render 整树替换激活新根）；null 时沿用"最后新建节点"规则
+    let activate: Text | null = null;
     const targetOf = (node: Text): AIEditStep["target"] => ({
       id: node.id!,
       text: node.text,
@@ -420,7 +491,11 @@ export class AIEditingController {
     // 1. 节点 id（最稳，含批内新建）；2. 路径 "A/B/C"（同名消歧首选）；
     // 3. "文本[n]"（第 n 个同名节点，先序 1 起）；4. 纯文本（全局唯一时直接命中，
     //    多个同名即抛消歧错误，列出各节点路径供模型改用路径/序号）
-    const ensureTarget = (target: string | undefined, no: string): Text => {
+    const ensureTarget = (
+      target: string | undefined,
+      no: string,
+      allowDeleted = false,
+    ): Text => {
       const raw = target?.trim();
       let node: Text | null;
       if (!raw) {
@@ -464,8 +539,16 @@ export class AIEditingController {
             : `无法定位锚点节点${no}`,
         );
       }
-      if (deleted.has(node.id!))
-        throw new Error(`AI 操作目标已被本次删除: "${raw ?? "锚点节点"}"${no}`);
+      // 目标在批内已移除子树内（含子树后代）：delete 连同整个子树删除、render
+      // 整树替换——引用这些节点的操作在 redo 时已无从落地，delete 允许放行
+      //（由调用方记为跳过），其余操作编译期即拒绝并说明移除来源
+      for (let p: Text | null = node; p; p = p.parent as Text | null) {
+        const by = deleted.get(p.id!);
+        if (by && !allowDeleted)
+          throw new Error(
+            `AI 操作目标已在${by}被移除: "${raw ?? "锚点节点"}"${no}（delete 连同子树删除、render 整树替换，后续操作请引用现存节点）`,
+          );
+      }
       return node;
     };
     const exists = (id: string) => byId(id) !== null;
@@ -696,9 +779,116 @@ export class AIEditingController {
         continue;
       }
 
+      // render：整树替换。旧树节点全部登记进 deleted（后续操作引用旧 id 时，
+      // delete 记为跳过、其余操作编译失败并指向新树）；新树沿用 AI 给出的 id
+      //（批内去重，后续操作可引用），经 renderNode 重建节点、collectEdges 重建连线，
+      // redo/undo 以对象引用整体换入换出场景；序列化见 toJSON（mindmap.render）
+      if (op.op === "render") {
+        const data = normalizeRenderTree(op.tree, no);
+        const markGone = (n: Text) => {
+          deleted.set(n.id!, no);
+          n.children.forEach((c) => markGone(c as Text));
+        };
+        markGone(root);
+        // 批内去重：与既有 id（含前序操作新建节点）冲突或重复出现的 id 剥除，
+        // 运行时自动生成新 id，避免会话注册表被同 id 覆盖产生歧义
+        const seenIds = new Set<string>();
+        const adopt = (node: MindMapNode): MindMapNode => ({
+          ...node,
+          id:
+            typeof node.id === "string" &&
+            node.id &&
+            !seenIds.has(node.id) &&
+            !session.has(node.id)
+              ? (seenIds.add(node.id), node.id)
+              : undefined,
+          children: node.children.map(adopt),
+        });
+        const newRoot = model.renderNode(adopt(data), 0);
+        const newEdges: MindEdge[] = [];
+        model.collectEdges(newRoot, newEdges);
+        const oldEdges = [...model.edges];
+        registerSubtree(newRoot);
+        const bindAll = (n: Text) => {
+          created.push(n);
+          n.children.forEach((c) => bindAll(c as Text));
+        };
+        bindAll(newRoot);
+        let nodeCount = 0;
+        const count = (n: Text) => {
+          nodeCount++;
+          n.children.forEach((c) => count(c as Text));
+        };
+        count(newRoot);
+        commands.push({
+          type: "ai",
+          redo: () => {
+            const prevRoot = model.root!;
+            const prevEdges = [...model.edges];
+            app.remove(prevRoot);
+            app.remove(prevEdges);
+            model.root = newRoot;
+            model.edges = newEdges;
+            app.add(newRoot);
+            app.add(newEdges);
+          },
+          undo: () => {
+            app.remove(newRoot);
+            app.remove(newEdges);
+            model.root = root;
+            model.edges = oldEdges;
+            app.add(root);
+            app.add(oldEdges);
+          },
+          // 序列化：双侧整树定格快照 + collectEdges 深度先序配对的连线 id，
+          // 解码侧据此整树重建并按 id 回写连线，跨命令按 id 解析的引用保持一致
+          toJSON: () => ({
+            kind: "mindmap.render",
+            payload: {
+              before: {
+                root: model.serializeForHistory(root),
+                edgeIds: oldEdges.map((e) => e.id),
+              },
+              after: {
+                root: model.serializeForHistory(newRoot),
+                edgeIds: newEdges.map((e) => e.id),
+              },
+            },
+          }),
+        });
+        steps.push({
+          op,
+          label: `用新数据重渲染整棵导图（${nodeCount} 个节点）`,
+          status: "applied",
+          target: targetOf(newRoot),
+        });
+        activate = newRoot;
+        focus = newRoot;
+        continue;
+      }
+
       // delete：目标子树快照 + 端点在子树内的连线清理（含批内新建的 pending 连线），
       // 复用 delete 命令形状（kind: mindmap.delete）
-      const node = ensureTarget(op.target, no);
+      const node = ensureTarget(op.target, no, true);
+      // 目标已随前序操作移除（重复删除同一节点 / 删除已删子树的后代 / render
+      // 整树替换后引用旧节点）：目标早已不在树上，记为跳过，不再编译出空转命令
+      let deletedIn: string | null = null;
+      for (let p: Text | null = node; p; p = p.parent as Text | null) {
+        const by = deleted.get(p.id!);
+        if (by) {
+          deletedIn = by;
+          break;
+        }
+      }
+      if (deletedIn) {
+        steps.push({
+          op,
+          label: `「${node.text}」已在${deletedIn}被移除，本条跳过`,
+          status: "skipped",
+          target: targetOf(node),
+        });
+        continue;
+      }
       if (node === model.root) throw new Error("AI 不能删除根节点");
       const parent = node.parent as Text;
       const index = parent.children.indexOf(node);
@@ -750,10 +940,10 @@ export class AIEditingController {
         status: "applied",
         target: targetOf(node),
       });
-      deleted.add(node.id!);
+      deleted.set(node.id!, no);
     }
 
-    return { commands, created, steps, focus };
+    return { commands, created, steps, focus, activate };
   }
 }
 

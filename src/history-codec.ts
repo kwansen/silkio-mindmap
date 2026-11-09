@@ -2,7 +2,7 @@
 // HistoryCommand。只依赖 core 契约与自有模型，不依赖 plugin-*（check-deps 分层约束）。
 //
 // 引用解析规则（与导出载荷一一对应）：
-// - 节点按 id 解析：先查树上（nodeById），再查会话注册表；查不到且载荷内嵌了
+// - 节点按 id 解析：先查会话注册表，再查树上（nodeById）；查不到且载荷内嵌了
 //   子树数据（add/paste/delete 的 node 字段）时经 renderNode(data, 0, true) 重建
 //   并登记整个子树的 id（保证跨命令引用同一实例）。
 // - 连线按 id 解析：先查模型连线表，再查会话注册表；查不到时按 (fromId,toId)
@@ -77,6 +77,15 @@ interface EdgePayload {
   before: EdgeShape;
   after: EdgeShape;
 }
+// render（AI 整树替换）双侧载荷：整树定格快照 + collectEdges 深度先序配对的连线 id
+interface RenderSide {
+  root: MindMapNode;
+  edgeIds: string[];
+}
+interface RenderPayload {
+  before: RenderSide;
+  after: RenderSide;
+}
 
 // 创建编解码器：decode 把 SerializedCommand 重建为 HistoryCommand（失败返回 null）
 export function createMindmapCodec(deps: MindmapCodecDeps) {
@@ -85,9 +94,12 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
   const nodes = new Map<string, Text>();
   const edges = new Map<string, MindEdge>();
 
-  // 节点解析：树上 → 注册表；都没有且调用方提供内嵌数据则重建并登记整个子树
+  // 节点解析：注册表 → 树上。注册表优先：render（AI 整树替换）会为与现存树
+  // 相同的 id 登记全新的轨迹实例（前后树复用 id 表达不同实例），按解码轨迹
+  // "后注册者胜出"才能让后续命令绑定到正确一侧的实例；无 render 的栈里
+  // 注册表只含树上查不到的 id（ensureNode 仅在树上缺失时登记），两序等价
   function resolveNode(id: string): Text | null {
-    return model.nodeById(id) ?? nodes.get(id) ?? null;
+    return nodes.get(id) ?? model.nodeById(id) ?? null;
   }
 
   // 把节点子树的全部 id 登记进注册表（renderNode 重建后子树结构已完整）
@@ -150,6 +162,8 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
         return decodeLayout(s.payload as LayoutPayload);
       case "mindmap.edge":
         return decodeEdge(s.payload as EdgePayload);
+      case "mindmap.render":
+        return decodeRender(s.payload as RenderPayload);
       default:
         return null;
     }
@@ -373,6 +387,75 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
       undo: () => apply(p.before),
       // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
       toJSON: () => ({ kind: "mindmap.edge", payload: p }),
+    };
+  }
+
+  // render（AI 整树替换）单侧整树重建：before 侧优先复用注册表实例（此前命令已为
+  // 同一轨迹位置登记的实例，如前一轮 render 的 after 侧），after 侧总是按数据全新
+  // 重建并覆盖登记——前后树复用同一 id 表达不同实例，after 侧若复用 before 侧实例
+  // 会丢失结构差异。两侧都刻意不走树上解析——解码时树上是最终态（render 之后的
+  // 世界），直接复用会错绑。连线按 collectEdges 深度先序与 edgeIds 配对（对齐
+  // decodePaste 的内连线纪律），配对数不符返回 null 整体放弃导入
+  function decodeRenderSide(
+    side: RenderSide,
+    alwaysFresh: boolean,
+  ): { root: Text; edges: MindEdge[] } | null {
+    if (!side.root.id) return null;
+    let treeRoot = alwaysFresh ? null : (nodes.get(side.root.id) ?? null);
+    if (!treeRoot) {
+      treeRoot = model.renderNode(side.root, 0, true);
+      registerSubtree(treeRoot);
+    }
+    const pairs: Array<[Text, Text]> = [];
+    const walk = (parent: Text) => {
+      parent.children.forEach((c) => {
+        pairs.push([parent, c as Text]);
+        walk(c as Text);
+      });
+    };
+    walk(treeRoot);
+    if (pairs.length !== side.edgeIds.length) return null;
+    const out: MindEdge[] = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const [f, t] = pairs[i];
+      const e = resolveEdge(side.edgeIds[i], f.id!, t.id!);
+      if (!e) return null;
+      out.push(e);
+    }
+    return { root: treeRoot, edges: out };
+  }
+
+  // render 整树替换命令：redo 把 after 侧整树换入场景并接管 model.root/edges，
+  // undo 换回 before 侧。双侧实例在解码期重建并登记（after 侧后注册，覆盖与
+  // before 侧重复的 id），后续命令按注册表解析即绑定到正确一侧
+  function decodeRender(p: RenderPayload): HistoryCommand | null {
+    const before = decodeRenderSide(p.before, false);
+    const after = decodeRenderSide(p.after, true);
+    if (!before || !after) return null;
+    return {
+      type: "ai",
+      redo: () => {
+        const prevRoot = model.root!;
+        const prevEdges = [...model.edges];
+        app.remove(prevRoot);
+        app.remove(prevEdges);
+        model.root = after.root;
+        model.edges = after.edges;
+        app.add(after.root);
+        app.add(after.edges);
+      },
+      undo: () => {
+        const prevRoot = model.root!;
+        const prevEdges = [...model.edges];
+        app.remove(prevRoot);
+        app.remove(prevEdges);
+        model.root = before.root;
+        model.edges = before.edges;
+        app.add(before.root);
+        app.add(before.edges);
+      },
+      // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
+      toJSON: () => ({ kind: "mindmap.render", payload: p }),
     };
   }
 
