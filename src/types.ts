@@ -70,7 +70,14 @@ export interface MindMapOptions {
   plugins?: Plugin[];
 }
 
-// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换
-export type MindMapChangeType = "add" | "delete" | "move" | "text" | "collapse";
+// 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换 / 布局方向切换 / 连线样式切换
+export type MindMapChangeType =
+  | "add"
+  | "delete"
+  | "move"
+  | "text"
+  | "collapse"
+  | "layout"
+  | "edge";
 
 export type LayoutDirection = NonNullable<MindMapOptions["direction"]>;

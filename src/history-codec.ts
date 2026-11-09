@@ -12,14 +12,16 @@
 // 复合命令（core 的 composite kind）在此解码为 compose(...)，子命令递归走本解码器。
 // 解码失败的命令返回 null：importJSON 收到 null 即整体放弃导入且不改动栈。
 import { compose } from "@silker/core";
-import type { App, HistoryCommand, SerializedCommand, Text } from "@silker/core";
+import type { App, EdgeShape, HistoryCommand, SerializedCommand, Text } from "@silker/core";
 import type { MindEdge } from "./Edge";
 import type { MindTree } from "./model";
-import type { MindMapNode, Style } from "./types";
+import type { LayoutDirection, MindMapNode, Style } from "./types";
 
 export interface MindmapCodecDeps {
   model: MindTree;
   app: App;
+  // 布局方向命令重建入口：恢复门面/模型/各控制器方向状态（MindMap.applyDirection）
+  onDirection: (direction: LayoutDirection) => void;
 }
 
 // 会话注册表：一次 importHistory 的引用解析上下文（codec 实例即会话，
@@ -29,7 +31,7 @@ interface MindmapImportSession {
   edges: Map<string, MindEdge>;
 }
 
-// 各 kind 的载荷形状（与 operations.ts / editing.ts / drag.ts 的 toJSON 一一对应）
+// 各 kind 的载荷形状（与 operations.ts / editing.ts / drag.ts / mindmap.ts 的 toJSON 一一对应）
 interface AddPayload {
   parentId: string;
   index: number;
@@ -66,6 +68,14 @@ interface TextPayload {
   nodeId: string;
   before: string;
   after: string;
+}
+interface LayoutPayload {
+  before: LayoutDirection;
+  after: LayoutDirection;
+}
+interface EdgePayload {
+  before: EdgeShape;
+  after: EdgeShape;
 }
 
 // 创建编解码器：decode 把 SerializedCommand 重建为 HistoryCommand（失败返回 null）
@@ -136,6 +146,10 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
         return decodeMove(s.payload as MovePayload);
       case "mindmap.text":
         return decodeText(s.payload as TextPayload);
+      case "mindmap.layout":
+        return decodeLayout(s.payload as LayoutPayload);
+      case "mindmap.edge":
+        return decodeEdge(s.payload as EdgePayload);
       default:
         return null;
     }
@@ -326,6 +340,39 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
         node.text = p.before;
       },
       toJSON: () => ({ kind: "mindmap.text", payload: p }),
+    };
+  }
+
+  // 布局方向命令：纯方向快照，无对象引用，恢复门面方向状态后由 undo/redo 流程统一重布局。
+  // 载荷方向非法（脏数据）时返回 null 整体放弃导入
+  function decodeLayout(p: LayoutPayload): HistoryCommand | null {
+    const dirs: LayoutDirection[] = ["left", "right", "down", "both"];
+    if (!dirs.includes(p.before) || !dirs.includes(p.after)) return null;
+    return {
+      type: "layout",
+      redo: () => deps.onDirection(p.after),
+      undo: () => deps.onDirection(p.before),
+      // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
+      toJSON: () => ({ kind: "mindmap.layout", payload: p }),
+    };
+  }
+
+  // 连线样式命令：按当前连线表重建为载荷样式（setEdgeStyle 继承纵向标志/可见性并
+  // 沿用原连线 id，跨命令按 id 解析的引用保持一致）；场景同步增删。样式未变化时
+  // setEdgeStyle 返回 null 直接跳过（正常导入纪律下 undo/redo 交替执行不会命中）
+  function decodeEdge(p: EdgePayload): HistoryCommand {
+    const apply = (shape: EdgeShape) => {
+      const old = [...model.edges];
+      if (model.setEdgeStyle(shape) === null) return;
+      app.remove(old);
+      app.add(model.edges);
+    };
+    return {
+      type: "edge",
+      redo: () => apply(p.after),
+      undo: () => apply(p.before),
+      // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
+      toJSON: () => ({ kind: "mindmap.edge", payload: p }),
     };
   }
 

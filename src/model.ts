@@ -43,20 +43,23 @@ export class MindTree {
   }
 
   // 切换连线样式：bezier 与 path 系是两个连线类，无法原地改 shape，按新样式重建全部
-  // 连线对象并继承原连线的纵向标志与可见性；edges 数组原地替换（引用持有方无感）。
-  // 样式未变化时返回 false 不做任何事
-  setEdgeStyle(shape: EdgeShape): boolean {
-    if (shape === this.edgeStyle) return false;
+  // 连线对象并继承原连线的纵向标志、可见性与 id（id 稳定保证历史命令按 id 解析的
+  // 引用一致性）；edges 数组原地替换（引用持有方无感）。
+  // 样式未变化时不做任何事，返回 null；变化时返回切换前的样式（历史命令载荷取 before）
+  setEdgeStyle(shape: EdgeShape): EdgeShape | null {
+    if (shape === this.edgeStyle) return null;
+    const before = this.edgeStyle;
     this.edgeStyle = shape;
     const next = this.edges.map((e) => {
       const ne = this.createEdge(e.fromNode, e.toNode);
+      ne.id = e.id;
       ne.vertical = e.vertical;
       ne.visible = e.visible;
       return ne;
     });
     this.edges.length = 0;
     this.edges.push(...next);
-    return true;
+    return before;
   }
 
   // 按连线样式创建父子连线（统一入口，三处创建点共用）；纵向布局（down）创建垂直连线
