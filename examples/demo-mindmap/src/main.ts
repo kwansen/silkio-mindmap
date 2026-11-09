@@ -198,10 +198,38 @@ for (const p of officialPlugins()) app.use(p);
 // 撤销/重做工具条：点击触发对应操作，按历史栈可用性禁用按钮（含 undo/redo 后刷新）
 const undoBtn = document.getElementById("undo-btn") as HTMLButtonElement;
 const redoBtn = document.getElementById("redo-btn") as HTMLButtonElement;
-const directionSelect = document.getElementById(
-  "direction-select",
-) as HTMLSelectElement;
-const edgeSelect = document.getElementById("edge-select") as HTMLSelectElement;
+
+// 悬浮菜单通用装配：hover 展开选项面板，点击选项后回写当前项——
+// trigger 含 .trigger-label 时更新短标签文字（连线/缩放菜单），
+// 含 [data-icon-value] 图标组时切换显示对应图标（布局菜单，纯图标无文字）
+function setupMenu(
+  menuId: string,
+  initial: string,
+  onPick: (value: string) => void,
+) {
+  const menu = document.getElementById(menuId)!;
+  const trigger = menu.querySelector(".menu-trigger") as HTMLButtonElement;
+  const label = trigger.querySelector<HTMLElement>(".trigger-label");
+  const icons = [
+    ...trigger.querySelectorAll<SVGElement>("[data-icon-value]"),
+  ];
+  const items = [...menu.querySelectorAll<HTMLButtonElement>(".menu-item")];
+  const setActive = (value: string) => {
+    const current = items.find((i) => i.dataset.value === value);
+    if (current && label) label.textContent = current.dataset.short!;
+    icons.forEach((icon) =>
+      icon.toggleAttribute("hidden", icon.dataset.iconValue !== value),
+    );
+    items.forEach((i) => i.classList.toggle("active", i === current));
+  };
+  items.forEach((item) =>
+    item.addEventListener("click", () => {
+      setActive(item.dataset.value!);
+      onPick(item.dataset.value!);
+    }),
+  );
+  setActive(initial);
+}
 
 let mindmap!: MindMap;
 const refreshToolbar = () => {
@@ -231,15 +259,12 @@ function createMindmap(direction: "left" | "right" | "down" | "both") {
 
 // 布局方向设置：横向思维导图（right）/ 左向思维导图（left）/ 双向平衡布局（both）/ 组织结构图（down）
 // 同一实例原地设置：数据、选中态、撤销栈均保留
-directionSelect.addEventListener("change", () => {
-  void mindmap.setLayout(
-    directionSelect.value as "left" | "right" | "down" | "both",
-  );
+setupMenu("layout-menu", "right", (value) => {
+  void mindmap.setLayout(value as "left" | "right" | "down" | "both");
 });
 // 连线形状设置：同一实例原地重建连线，数据、选中态、撤销栈均保留
-edgeSelect.value = edgeStyle;
-edgeSelect.addEventListener("change", () => {
-  mindmap.setEdgeStyle(edgeSelect.value as EdgeShape);
+setupMenu("edge-menu", edgeStyle, (value) => {
+  mindmap.setEdgeStyle(value as EdgeShape);
 });
 createMindmap("right");
 
@@ -259,7 +284,7 @@ const zoomValue = document.getElementById("zoom-value") as HTMLSpanElement;
 
 const updateZoomUI = (scale: number) => {
   zoomSlider.value = String(Math.round(scale * 100));
-  zoomValue.textContent = `${Math.round(scale * 100)}%`;
+  zoomValue.textContent = String(Math.round(scale * 100));
 };
 
 zoomSlider.addEventListener("input", () => {
@@ -283,17 +308,6 @@ app.camera.onViewportChange(() => {
   updateZoomUI(app.camera.scale);
 });
 
-// 导出图片：整棵树离屏渲染为 PNG 并触发下载
-const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
-exportBtn.addEventListener("click", async () => {
-  const blob = await mindmap.toImage();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "mindmap.png";
-  a.click();
-  URL.revokeObjectURL(url);
-});
 // 初始渲染由 MindMap 异步 init 完成后自行触发（requestRender），无需外部渲染
 refreshToolbar();
 // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）

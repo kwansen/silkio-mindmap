@@ -50,52 +50,138 @@
       outline: none;
       height: 600px;
     }
+    /* 单一胶囊工具条：撤销/重做可点击，其余项悬浮展开选项面板 */
     #toolbar {
       position: fixed;
       top: 16px;
       right: 16px;
       display: flex;
-      gap: 8px;
+      align-items: center;
+      gap: 2px;
+      padding: 4px;
+      background-color: #ffffff;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
       z-index: 10;
     }
 
-    #zoom-control {
+    #toolbar button {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      background-color: #ffffff;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
       font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      background-color: transparent;
       color: #1f2937;
-    }
-
-    #zoom-slider {
-      width: 120px;
       cursor: pointer;
+      white-space: nowrap;
     }
 
-    #zoom-value {
-      min-width: 44px;
-      text-align: right;
+    #toolbar button svg {
+      display: block;
+      width: 16px;
+      height: 16px;
+      flex: none;
+    }
+
+    /* hidden 属性会被上面的 display: block 覆盖，这里强制恢复隐藏语义 */
+    #toolbar button svg[hidden] {
+      display: none;
+    }
+
+    /* 缩放数字：正方形内显示纯数字，字号缩小防溢出 */
+    .zoom-num {
+      font-size: 11px;
       font-variant-numeric: tabular-nums;
     }
 
-    #toolbar button,
-    #toolbar select {
-      padding: 6px 14px;
-      font-size: 14px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      background-color: #ffffff;
-      color: #1f2937;
-      cursor: pointer;
+    #toolbar button:hover:not(:disabled) {
+      background-color: #f3f4f6;
     }
 
     #toolbar button:disabled {
-      color: #9ca3af;
+      color: #c0c4cc;
       cursor: not-allowed;
+    }
+
+    /* 悬浮菜单：trigger + hover 展开的下拉面板 */
+    .menu {
+      position: relative;
+    }
+
+    .menu-pop {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 4px;
+      background-color: #ffffff;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      z-index: 20;
+    }
+
+    /* 透明桥接区：面板与工具条留出间距的同时，鼠标穿过间隙不会断开 hover */
+    .menu-pop::before {
+      content: "";
+      position: absolute;
+      top: -10px;
+      left: 0;
+      right: 0;
+      height: 10px;
+    }
+
+    .menu:hover .menu-pop {
+      display: flex;
+    }
+
+    .menu-item {
+      gap: 8px;
+      width: 100%;
+      text-align: left;
+    }
+
+    /* 弹出面板内的图标项：大号正方形，竖向排列 */
+    #toolbar button.icon-item {
+      width: 56px;
+      height: 56px;
+      padding: 0;
+    }
+
+    /* 权重需压过 #toolbar button svg 的 16px，否则图标尺寸不生效 */
+    #toolbar button.menu-item svg {
+      width: 36px;
+      height: 36px;
+      flex: none;
+      color: #6b7280;
+    }
+
+    .menu-item.active {
+      background-color: #e5edff;
+      color: #1d4ed8;
+    }
+
+    .menu-item.active svg {
+      color: #1d4ed8;
+    }
+
+    #zoom-pop {
+      min-width: 170px;
+      padding: 10px 14px;
+    }
+
+    #zoom-slider {
+      width: 140px;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -105,26 +191,64 @@
   <!-- <textarea name="" id="text2"></textarea> -->
   <canvas id="canvas"></canvas>
   <div id="toolbar">
-    <select id="direction-select">
-      <option value="right">横向思维导图</option>
-      <option value="left">左向思维导图</option>
-      <option value="both">双向平衡布局</option>
-      <option value="down">组织结构图</option>
-    </select>
-    <select id="edge-select">
-      <option value="bezier">贝塞尔曲线</option>
-      <option value="path">Z 字折线</option>
-      <option value="zBezier">Z 字贝塞尔</option>
-      <option value="rPath">圆角折线</option>
-    </select>
-    <div id="zoom-control">
-      <span>缩放</span>
-      <input id="zoom-slider" type="range" min="20" max="800" value="100" step="5" />
-      <span id="zoom-value">100%</span>
+    <button id="undo-btn" disabled title="撤销" aria-label="撤销">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+    </button>
+    <button id="redo-btn" disabled title="重做" aria-label="重做">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+    </button>
+    <div class="menu" id="layout-menu">
+      <button class="menu-trigger" title="布局方向">
+        <svg data-icon-value="right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="2.2"/><circle cx="18" cy="5" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="18" cy="19" r="1.6"/><path d="M9.2 12H13M13 5v14M13 5h3.4M13 12h3.4M13 19h3.4"/></svg>
+        <svg data-icon-value="left" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="17" cy="12" r="2.2"/><circle cx="6" cy="5" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="6" cy="19" r="1.6"/><path d="M14.8 12H11M11 5v14M11 5H7.6M11 12H7.6M11 19H7.6"/></svg>
+        <svg data-icon-value="both" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="7" r="1.7"/><circle cx="5" cy="17" r="1.7"/><circle cx="19" cy="7" r="1.7"/><circle cx="19" cy="17" r="1.7"/><path d="M9.8 12H8M8 7v10M8 7H6.7M8 17H6.7M14.2 12H16M16 7v10M16 7h1.3M16 17h1.3"/></svg>
+        <svg data-icon-value="down" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2"/><circle cx="5" cy="15" r="1.7"/><circle cx="12" cy="15" r="1.7"/><circle cx="19" cy="15" r="1.7"/><path d="M12 6.5V10M5 10h14M5 10v3.3M12 10v3.3M19 10v3.3"/></svg>
+      </button>
+      <div class="menu-pop">
+        <button class="menu-item icon-item" data-value="right" data-short="横向" title="横向思维导图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="2.2"/><circle cx="18" cy="5" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="18" cy="19" r="1.6"/><path d="M9.2 12H13M13 5v14M13 5h3.4M13 12h3.4M13 19h3.4"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="left" data-short="左向" title="左向思维导图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="17" cy="12" r="2.2"/><circle cx="6" cy="5" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="6" cy="19" r="1.6"/><path d="M14.8 12H11M11 5v14M11 5H7.6M11 12H7.6M11 19H7.6"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="both" data-short="双向" title="双向平衡布局">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="7" r="1.7"/><circle cx="5" cy="17" r="1.7"/><circle cx="19" cy="7" r="1.7"/><circle cx="19" cy="17" r="1.7"/><path d="M9.8 12H8M8 7v10M8 7H6.7M8 17H6.7M14.2 12H16M16 7v10M16 7h1.3M16 17h1.3"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="down" data-short="组织结构" title="组织结构图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2"/><circle cx="5" cy="15" r="1.7"/><circle cx="12" cy="15" r="1.7"/><circle cx="19" cy="15" r="1.7"/><path d="M12 6.5V10M5 10h14M5 10v3.3M12 10v3.3M19 10v3.3"/></svg>
+        </button>
+      </div>
     </div>
-    <button id="undo-btn" disabled>撤销</button>
-    <button id="redo-btn" disabled>重做</button>
-    <button id="export-btn">导出图片</button>
+    <div class="menu" id="edge-menu">
+      <button class="menu-trigger" title="连线形状">
+        <svg data-icon-value="bezier" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18C11 18 13 6 19 6"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        <svg data-icon-value="path" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h7V6h7"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        <svg data-icon-value="zBezier" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h4c4 0 3-12 6-12h4"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        <svg data-icon-value="rPath" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h4a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h4"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <div class="menu-pop">
+        <button class="menu-item icon-item" data-value="bezier" data-short="贝塞尔" title="贝塞尔曲线">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18C11 18 13 6 19 6"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="path" data-short="Z 折线" title="Z 字折线">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h7V6h7"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="zBezier" data-short="Z 贝塞尔" title="Z 字贝塞尔">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h4c4 0 3-12 6-12h4"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button class="menu-item icon-item" data-value="rPath" data-short="圆角折线" title="圆角折线">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h4a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h4"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="menu" id="zoom-menu">
+      <button class="menu-trigger" title="缩放">
+        <span class="trigger-label zoom-num" id="zoom-value">100</span>
+      </button>
+      <div class="menu-pop" id="zoom-pop">
+        <input id="zoom-slider" type="range" min="20" max="800" value="100" step="5" />
+      </div>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
