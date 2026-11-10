@@ -1,10 +1,26 @@
 <script setup lang="ts">
 // 思维导图 Demo：canvas + 胶囊工具条（撤销/重做、布局方向、连线形状、缩放）+
 // 文档切换器（IndexedDB 持久化：新建/打开/自动保存/删除）
-import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Component } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+  type Component,
+} from "vue";
 import { App, type EdgeShape } from "@silker/core";
 import { officialPlugins } from "@silker/preset";
-import { MindMap, defaultAIEditPrompt, type AIEditGenerate, type AIEditStep, type AIEditTurn, type MindMapNode, type Style } from "@silker/mindmap";
+import {
+  MindMap,
+  defaultAIEditPrompt,
+  type AIEditGenerate,
+  type AIEditStep,
+  type AIEditTurn,
+  type MindMapNode,
+  type Style,
+} from "@silker/mindmap";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import Undo from "../icons/Undo.vue";
 import Redo from "../icons/Redo.vue";
@@ -30,7 +46,7 @@ const levelStyles: Style[] = [
   // 一级样式：根节点
   {
     color: "#ffffffff",
-    backgroundColor: "#435465",
+    backgroundColor: "#A4B3C2",
     fontSize: 24,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -43,7 +59,7 @@ const levelStyles: Style[] = [
   // 二级样式：分支节点
   {
     color: "#1f2937",
-    backgroundColor: "#d7dee6ff",
+    backgroundColor: "#DCE2E8",
     fontSize: 16,
     fontWeight: 500,
     fontFamily: "sans-serif",
@@ -56,7 +72,7 @@ const levelStyles: Style[] = [
   // 三级样式
   {
     color: "#1f2937",
-    backgroundColor: "#f2f2f2ff",
+    backgroundColor: "#F9FAFB",
     fontSize: 14,
     fontWeight: 400,
     fontFamily: "sans-serif",
@@ -154,19 +170,29 @@ const AI_CONFIG_KEY = "mindmap-ai-config";
 const aiConfig = ref<AIConfig>(loadAIConfig());
 // 三项齐全才可调用
 const aiReady = computed(
-  () => !!(aiConfig.value.baseURL && aiConfig.value.apiKey && aiConfig.value.model),
+  () =>
+    !!(aiConfig.value.baseURL && aiConfig.value.apiKey && aiConfig.value.model),
 );
 
 // 新消息或流式思考更新时，消息流自动跟随到底部
-watch([aiMessages, aiPending], async () => {
-  await nextTick();
-  const box = chatBox.value;
-  if (box) box.scrollTop = box.scrollHeight;
-}, { deep: true });
+watch(
+  [aiMessages, aiPending],
+  async () => {
+    await nextTick();
+    const box = chatBox.value;
+    if (box) box.scrollTop = box.scrollHeight;
+  },
+  { deep: true },
+);
 
 function loadAIConfig(): AIConfig {
   try {
-    return { baseURL: "", apiKey: "", model: "", ...JSON.parse(localStorage.getItem(AI_CONFIG_KEY) ?? "{}") };
+    return {
+      baseURL: "",
+      apiKey: "",
+      model: "",
+      ...JSON.parse(localStorage.getItem(AI_CONFIG_KEY) ?? "{}"),
+    };
   } catch {
     return { baseURL: "", apiKey: "", model: "" };
   }
@@ -190,7 +216,10 @@ const realGenerate: AIEditGenerate = async (req) => {
   if (aiPending.value) aiPending.value.reasoning = "";
   const res = await fetch(baseURL.replace(/\/+$/, "") + "/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: defaultAIEditPrompt(req) }],
@@ -200,14 +229,17 @@ const realGenerate: AIEditGenerate = async (req) => {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`AI 服务请求失败（HTTP ${res.status}）${text ? `：${text.slice(0, 160)}` : ""}`);
+    throw new Error(
+      `AI 服务请求失败（HTTP ${res.status}）${text ? `：${text.slice(0, 160)}` : ""}`,
+    );
   }
   // 服务端不支持流式：一次性读取，思考过程取完整 message 字段
   if (!res.body) {
     const data = await res.json();
     const msg = data?.choices?.[0]?.message;
     if (aiPending.value)
-      aiPending.value.reasoning = msg?.reasoning_content ?? msg?.reasoning ?? "";
+      aiPending.value.reasoning =
+        msg?.reasoning_content ?? msg?.reasoning ?? "";
     if (!msg?.content) throw new Error("AI 服务返回内容为空");
     return msg.content;
   }
@@ -497,7 +529,11 @@ function flushSave() {
 
 // 挂载场景：宿主 App 与官方插件复用（MindMap.destroy 对称拆卸自有插件与
 // 场景节点，App 不受影响），销毁旧门面后以新数据重建，实现打开/新建导图
-function mountScene(nodeData: MindMapNode, direction: LayoutDirection, shape: EdgeShape) {
+function mountScene(
+  nodeData: MindMapNode,
+  direction: LayoutDirection,
+  shape: EdgeShape,
+) {
   mindmap?.destroy();
   mindmap = new MindMap({
     app,
@@ -657,7 +693,10 @@ onUnmounted(() => {
           >
             <File class="h-3.5 w-3.5 shrink-0 text-gray-400" />
             <div class="min-w-0 flex-1 text-left">
-              <div class="truncate text-xs" :class="{ 'text-blue-700': d.id === currentId }">
+              <div
+                class="truncate text-xs"
+                :class="{ 'text-blue-700': d.id === currentId }"
+              >
                 {{ d.name }}
               </div>
               <div class="text-[10px] text-gray-400">
@@ -706,10 +745,7 @@ onUnmounted(() => {
         class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
         title="布局方向"
       >
-        <component
-          :is="layoutIcons[layout]"
-          class="block h-4 w-4 shrink-0"
-        />
+        <component :is="layoutIcons[layout]" class="block h-4 w-4 shrink-0" />
       </button>
       <div
         class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
@@ -869,7 +905,9 @@ onUnmounted(() => {
         placeholder="模型名，如 deepseek-chat"
       />
       <div class="flex items-center justify-between">
-        <span class="text-[10px] text-gray-400">保存在浏览器本地；服务端需允许跨域或走本地代理</span>
+        <span class="text-[10px] text-gray-400"
+          >保存在浏览器本地；服务端需允许跨域或走本地代理</span
+        >
         <button
           class="h-7 shrink-0 cursor-pointer rounded-lg bg-gray-900 px-3 text-xs text-white hover:bg-gray-700"
           @click="saveAIConfig"
@@ -881,47 +919,71 @@ onUnmounted(() => {
 
     <!-- 消息流 -->
     <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
-      <div v-if="!aiMessages.length && !aiPending" class="mt-10 text-center text-xs leading-5 text-gray-400">
-        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 / 这个导图讲了什么<br />
-        撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如 "线性代数/矩阵"
+      <div
+        v-if="!aiMessages.length && !aiPending"
+        class="mt-10 text-center text-xs leading-5 text-gray-400"
+      >
+        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 /
+        这个导图讲了什么<br />
+        撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如
+        "线性代数/矩阵"
       </div>
 
       <div v-for="m in aiMessages" :key="m.id">
         <!-- 用户指令：右侧气泡 -->
         <div v-if="m.role === 'user'" class="flex justify-end">
-          <div class="max-w-[85%] rounded-xl rounded-br-sm bg-violet-500 px-3 py-2 text-xs leading-5 text-white">
+          <div
+            class="max-w-[85%] rounded-xl rounded-br-sm bg-violet-500 px-3 py-2 text-xs leading-5 text-white"
+          >
             {{ m.text }}
           </div>
         </div>
         <!-- 错误 -->
-        <div v-else-if="m.role === 'error'" class="text-xs leading-5 text-red-500">
+        <div
+          v-else-if="m.role === 'error'"
+          class="text-xs leading-5 text-red-500"
+        >
           {{ m.text }}
         </div>
         <!-- AI 回复：思考过程（可折叠）+ 回答 + 执行反馈链 -->
         <div v-else class="flex flex-col gap-2">
-          <details v-if="m.reasoning" class="rounded-lg bg-gray-50 px-2.5 py-1.5">
-            <summary class="cursor-pointer text-xs text-gray-400 select-none">思考过程</summary>
-            <div class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400">{{
-              m.reasoning
-            }}</div>
+          <details
+            v-if="m.reasoning"
+            class="rounded-lg bg-gray-50 px-2.5 py-1.5"
+          >
+            <summary class="cursor-pointer text-xs text-gray-400 select-none">
+              思考过程
+            </summary>
+            <div
+              class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
+            >
+              {{ m.reasoning }}
+            </div>
           </details>
           <div
             v-if="m.text"
             class="text-xs leading-5 whitespace-pre-wrap text-gray-600"
-            >{{ m.text }}</div
           >
+            {{ m.text }}
+          </div>
           <div v-if="m.steps?.length" class="flex flex-col gap-1">
             <div
               v-for="(s, i) in m.steps"
               :key="i"
               class="flex items-start gap-1.5 text-xs leading-5"
             >
-              <span :class="s.status === 'applied' ? 'text-emerald-500' : 'text-gray-300'">{{
-                s.status === "applied" ? "✓" : "–"
-              }}</span>
-              <span :class="s.status === 'applied' ? 'text-gray-600' : 'text-gray-400'">{{
-                s.label
-              }}</span>
+              <span
+                :class="
+                  s.status === 'applied' ? 'text-emerald-500' : 'text-gray-300'
+                "
+                >{{ s.status === "applied" ? "✓" : "–" }}</span
+              >
+              <span
+                :class="
+                  s.status === 'applied' ? 'text-gray-600' : 'text-gray-400'
+                "
+                >{{ s.label }}</span
+              >
             </div>
           </div>
         </div>
@@ -934,10 +996,14 @@ onUnmounted(() => {
           open
           class="rounded-lg bg-gray-50 px-2.5 py-1.5"
         >
-          <summary class="cursor-pointer text-xs text-gray-400 select-none">思考中…</summary>
-          <div class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400">{{
-            aiPending.reasoning
-          }}</div>
+          <summary class="cursor-pointer text-xs text-gray-400 select-none">
+            思考中…
+          </summary>
+          <div
+            class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
+          >
+            {{ aiPending.reasoning }}
+          </div>
         </details>
         <div v-else class="flex items-center gap-1.5 text-xs text-gray-400">
           <Sparkles class="h-3.5 w-3.5 animate-pulse text-violet-400" />
