@@ -371,6 +371,9 @@ const docName = ref("");
 // 自动保存防抖定时器与当前文档建档时间
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let docCreatedAt = 0;
+// 上次落盘内容快照（数据 + 方向 + 连线）：保存前对比，内容未变不写库。
+// 打开/新建时建立基线，挂载还原触发的 onChange 因对比相等而不会误更新
+let lastSaved = "";
 
 // 布局方向选项：value 同时是触发器图标 data-icon-value 与菜单项值
 const layoutOptions: {
@@ -522,10 +525,21 @@ function refreshDocs() {
   });
 }
 
-// 把当前场景数据落盘到当前文档（文档名取根节点文本，布局方向与连线样式随档保存）
+// 把当前场景数据落盘到当前文档（文档名取根节点文本，布局方向与连线样式随档保存）。
+// 与上次落盘内容逐字段对比，完全相等则跳过：打开即触发、改后撤销回原样都不会误更新
+function snapshotOf(
+  data: MindMapNode,
+  direction: LayoutDirection,
+  edgeStyle: EdgeShape,
+) {
+  return JSON.stringify([data, direction, edgeStyle]);
+}
+
 function saveCurrent() {
   if (!mindmap || !currentId.value) return;
   const data = mindmap.toJSON();
+  const snapshot = snapshotOf(data, layout.value, edge.value);
+  if (snapshot === lastSaved) return;
   docName.value = data.text;
   void putDoc({
     id: currentId.value,
@@ -535,7 +549,10 @@ function saveCurrent() {
     edgeStyle: edge.value,
     createdAt: docCreatedAt,
     updatedAt: Date.now(),
-  }).then(refreshDocs);
+  }).then(() => {
+    lastSaved = snapshot;
+    return refreshDocs();
+  });
 }
 
 // 数据变化后防抖自动保存：连续编辑合并为一次写库
@@ -548,7 +565,8 @@ function scheduleSave() {
   }, 600);
 }
 
-// 切换/新建/关闭前立刻落盘：取消待保存的定时器，此时 currentId 尚未变更，归属正确
+// 切换/新建/关闭前立刻落盘：取消待保存的定时器，此时 currentId 尚未变更，归属正确；
+// 内容与上次落盘相等时 saveCurrent 内部会跳过，不会产生空更新
 function flushSave() {
   if (saveTimer) {
     clearTimeout(saveTimer);
@@ -573,7 +591,8 @@ function mountScene(
     levelStyles,
     // AI 编辑生成适配器（OpenAI 兼容接口，配置见面板设置弹层）
     ai: realGenerate,
-    // 数据变化（新增/删除/移动/文本编辑/折叠/布局/连线/AI 编辑）时同步工具条并自动保存
+    // 数据变化（新增/删除/移动/文本编辑/折叠/布局/连线/AI 编辑）时同步工具条并自动保存；
+    // 挂载还原触发的 onChange 由 saveCurrent 的内容对比兜底，不会误写库
     onChange: () => {
       syncToolbar();
       scheduleSave();
@@ -604,6 +623,7 @@ function createNew(initial?: MindMapNode) {
   currentId.value = doc.id;
   docName.value = doc.name;
   docCreatedAt = now;
+  lastSaved = snapshotOf(docData, doc.direction, doc.edgeStyle);
   void putDoc(doc).then(refreshDocs);
   clearAiChat();
   mountScene(doc.data, doc.direction, doc.edgeStyle);
@@ -624,6 +644,7 @@ async function openDoc(id: string) {
   docCreatedAt = doc.createdAt;
   layout.value = doc.direction;
   edge.value = doc.edgeStyle;
+  lastSaved = snapshotOf(doc.data, doc.direction, doc.edgeStyle);
   clearAiChat();
   mountScene(doc.data, doc.direction, doc.edgeStyle);
 }
@@ -682,6 +703,7 @@ onMounted(async () => {
     docCreatedAt = latest.createdAt;
     layout.value = latest.direction;
     edge.value = latest.edgeStyle;
+    lastSaved = snapshotOf(latest.data, latest.direction, latest.edgeStyle);
     mountScene(latest.data, latest.direction, latest.edgeStyle);
   } else {
     // 首次使用：以示例数据创建首个文档
