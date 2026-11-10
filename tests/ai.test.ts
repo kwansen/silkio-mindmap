@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { Text } from "@silker/core";
 import {
+  AIEditingController,
   collectTargetCandidates,
   describeHistoryCommand,
   matchTargetSegment,
@@ -188,5 +189,136 @@ describe("describeHistoryCommand：序列化命令的可读描述", () => {
     expect(
       describeHistoryCommand({ kind: "thirdparty.custom", payload: null }, model),
     ).toBe("thirdparty.custom");
+  });
+});
+
+describe("AIEditingController.compile：批内 move + delete 的连线清理", () => {
+  // 回归：a → x → b → c，AI 先 move b 到 a 下、再 delete x。
+  // delete 的死连线必须在 redo 时按当时树状态计算——编译期 b 仍在 x 子树内，
+  // 若按编译期收集会把 b 子树自身的 b→c 连线误判为死连线，redo 时被错误删除
+  // 且不再恢复（表现为连线消失、刷新后才回来）
+  const fakeText = (id: string, text: string, children: any[] = []): any => {
+    const node: any = {
+      id,
+      text,
+      children,
+      parent: null,
+      collapsed: false,
+      visible: true,
+      attachChild(child: any, index?: number) {
+        child.parent = node;
+        node.children.splice(index ?? node.children.length, 0, child);
+      },
+      remove(child: any) {
+        const i = node.children.indexOf(child);
+        if (i >= 0) node.children.splice(i, 1);
+        child.parent = null;
+      },
+    };
+    children.forEach((c) => (c.parent = node));
+    return node;
+  };
+  const fakeEdge = (id: string, fromNode: any, toNode: any) => ({
+    id,
+    fromNode,
+    toNode,
+  });
+
+  function setup() {
+    const a = fakeText("a", "A");
+    const x = fakeText("x", "X");
+    const b = fakeText("b", "B");
+    const c = fakeText("c", "C");
+    a.attachChild(x);
+    x.attachChild(b);
+    b.attachChild(c);
+    const eAX = fakeEdge("e-ax", a, x);
+    const eXB = fakeEdge("e-xb", x, b);
+    const eBC = fakeEdge("e-bc", b, c);
+    const model: any = {
+      root: a,
+      edges: [eAX, eXB, eBC],
+      levelStyles: [],
+      nodeStyles: new WeakMap(),
+      customStyles: new WeakMap(),
+      nodeById: (id: string) => [a, x, b, c].find((t) => t.id === id) ?? null,
+      depthOf: (node: any) => {
+        let d = 0;
+        let p = node.parent;
+        while (p) {
+          d++;
+          p = p.parent;
+        }
+        return d;
+      },
+      levelStyle: () => ({}),
+      applyCollapseVisibility: () => {},
+      applyNodeStyle: () => {},
+      createEdge: (from: any, to: any) => fakeEdge(`e-${from.id}-${to.id}`, from, to),
+      serializeForHistory: (node: any): any => ({
+        id: node.id,
+        text: node.text,
+        children: node.children.map((ch: any) => model.serializeForHistory(ch)),
+      }),
+    };
+    const deps = {
+      app: { add: () => {}, remove: () => {} },
+      model,
+      history: { exec: () => {}, exportJSON: () => null },
+      undo: async () => true,
+      redo: async () => true,
+      editor: { bind: () => {} },
+      sel: { items: [] },
+      activation: {
+        active: null,
+        activate: () => {},
+        deactivate: () => {},
+        editing: false,
+      },
+      onRelayout: () => {},
+      emitChange: () => {},
+    };
+    const ctrl = new AIEditingController(deps as any, null);
+    return { a, x, b, c, eAX, eXB, eBC, model, ctrl };
+  }
+
+  it("move b 到 a 下后 delete x：b→c 连线保留，仅 x 及其连线被清理", () => {
+    const { a, x, b, c, eAX, eXB, eBC, model, ctrl } = setup();
+    const { commands } = (ctrl as any).compile(
+      [
+        { op: "move", target: "b", parent: "a" },
+        { op: "delete", target: "x" },
+      ],
+      "a",
+    );
+    // 模拟 exec：组合命令按序 redo
+    commands.forEach((cmd: any) => cmd.redo());
+    // 结构：b 移入 a，x 被删除，b 的子树完整保留
+    expect(a.children).toEqual([b]);
+    expect(b.children).toEqual([c]);
+    expect(c.parent).toBe(b);
+    expect(x.parent).toBeNull();
+    // 连线：仅 a→b 新增、a→x / x→b 清理，b→c 不受影响
+    expect(model.edges).toEqual([eBC, expect.objectContaining({ fromNode: a, toNode: b })]);
+    expect(model.edges).not.toContain(eAX);
+    expect(model.edges).not.toContain(eXB);
+  });
+
+  it("同一命令整体 undo：结构与连线完整还原", () => {
+    const { a, x, b, c, eAX, eXB, eBC, model, ctrl } = setup();
+    const { commands } = (ctrl as any).compile(
+      [
+        { op: "move", target: "b", parent: "a" },
+        { op: "delete", target: "x" },
+      ],
+      "a",
+    );
+    commands.forEach((cmd: any) => cmd.redo());
+    // 组合命令 undo 逆序回放
+    [...commands].reverse().forEach((cmd: any) => cmd.undo());
+    expect(a.children).toEqual([x]);
+    expect(x.children).toEqual([b]);
+    expect(b.children).toEqual([c]);
+    expect(model.edges).toEqual([eBC, eAX, eXB]);
   });
 });

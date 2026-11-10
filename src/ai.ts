@@ -645,7 +645,8 @@ export class AIEditingController {
     const root = model.root!;
     // 批内会话注册表：新建节点 id → 运行时节点（redo 前不在树上，nodeById 查不到）
     const session = new Map<string, Text>();
-    // 批内新建（尚未入 model.edges）的连线：delete 的连线清理需覆盖这些
+    // 批内新建（尚未入 model.edges）的连线：move 的旧连线查找需覆盖这些；
+    // delete 的死连线改在 redo 时按当时 model.edges 计算（届时批内连线均已入表）
     const pendingEdges: MindEdge[] = [];
     // 批内已删除目标节点 id → 删除发生的操作序号（"第 N 项"）：delete 引用已删
     // 子树内节点时记为跳过（子树已随前者一并删除），其余操作引用即编译失败
@@ -1082,18 +1083,31 @@ export class AIEditingController {
       if (node === model.root) throw new Error("AI 不能删除根节点");
       const parent = node.parent as Text;
       const index = parent.children.indexOf(node);
+      // 编译期子树仅用于反馈文案（"及其 N 个子节点"）；死连线在 redo 时按当时
+      // 树状态计算——编译期树未变（批内前序 move 尚未执行），此刻收集会把
+      // "即将被移出子树的节点"也计入（先 move x 的子节点 b 再 delete x 时，
+      // b 子树自身的 b→c 连线会被误判为死连线，redo 时被错误删除且不再恢复，
+      // 表现为连线消失、刷新后才回来）。redo 时子树已是移动后的真实结构，
+      // 且前序操作的连线（pendingEdges）均已入 model.edges，据此计算即为准确死集
       const subtree = new Set<object>();
       const collect = (n: object) => {
         subtree.add(n);
         (n as Text).children.forEach(collect);
       };
       collect(node);
-      const dead = [...model.edges, ...pendingEdges].filter(
-        (e) => subtree.has(e.fromNode) || subtree.has(e.toNode),
-      );
+      let dead: MindEdge[] = [];
       commands.push({
         type: "delete",
         redo: () => {
+          const liveSubtree = new Set<object>();
+          const collectLive = (n: object) => {
+            liveSubtree.add(n);
+            (n as Text).children.forEach(collectLive);
+          };
+          collectLive(node);
+          dead = model.edges.filter(
+            (e) => liveSubtree.has(e.fromNode) || liveSubtree.has(e.toNode),
+          );
           parent.remove(node);
           model.edges = model.edges.filter((e) => !dead.includes(e));
           dead.forEach((e) => app.remove(e));
