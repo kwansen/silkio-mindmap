@@ -11,6 +11,8 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
+import { CLIPBOARD_CAPABILITY } from "@silker/core";
+import type { ClipboardCapability } from "@silker/core";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -59,15 +61,19 @@ export class MindMap {
   // 自动布局能力（BuiltinTreeLayout 插件 install 时注册，第三方布局插件可同名覆盖）：
   // 各结构变更路径经 relayout 按能力键消费，注册表缺失属于装配错误（require 兜底）
   private layout!: AutoLayoutCapability;
-  // 命令与键位能力：动作注册为命令、按键统一分发（撤销/复制/粘贴/删除等默认键位见构造器）
+  // 命令与键位能力：动作注册为命令、按键统一分发（撤销/删除等默认键位见构造器；
+  // 复制/粘贴走原生剪贴板事件，不经 keydown 分发）
   private commands!: CommandCapability;
+  // 剪贴板能力（Clipboard 插件 install 时注册，未装配时为 null——复制/粘贴命令降级为无操作）：
+  // 场景以 consumer 身份参与 copy/paste 事件分发
+  private clipboard: ClipboardCapability | null;
   // 数据模型（节点树/连线/样式缓存的唯一属主）
   private model: MindTree;
   // 激活/编辑控制器（激活态与编辑态两态机）
   private activation: ActivationController;
   // 折叠控制器（开关枚举/命中/悬浮与切换）
   private collapse: CollapseController;
-  // 节点操作（新建/删除/复制/粘贴，clipboard 属主）
+  // 节点操作（新建/删除/复制/粘贴，载荷序列化与外部文本建节点）
   private operations: NodeOperations;
   // AI 编辑控制器（AIEditingPlugin 经此提供 mindmap.ai 能力；门面经 ai getter 暴露）
   private aiController: AIEditingController;
@@ -116,12 +122,18 @@ export class MindMap {
     this.commands.register({
       id: "mindmap.copy",
       title: "复制选中",
-      run: () => this.operations.copySelection(),
+      run: () => {
+        const entry = this.operations.copySelection();
+        if (entry) void this.clipboard?.write(entry);
+      },
     });
     this.commands.register({
       id: "mindmap.paste",
       title: "粘贴",
-      run: () => this.operations.pasteClipboard(),
+      run: async () => {
+        const entry = await this.clipboard?.read("mindmap");
+        if (entry) await this.operations.pasteFromEntry(entry);
+      },
     });
     this.commands.register({
       id: "mindmap.delete",
@@ -137,8 +149,6 @@ export class MindMap {
     this.commands.bind("mod+z", "mindmap.undo");
     this.commands.bind("mod+shift+z", "mindmap.redo");
     this.commands.bind("mod+y", "mindmap.redo");
-    this.commands.bind("mod+c", "mindmap.copy");
-    this.commands.bind("mod+v", "mindmap.paste");
     this.commands.bind("delete", "mindmap.delete");
     this.commands.bind("backspace", "mindmap.delete");
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
@@ -229,6 +239,19 @@ export class MindMap {
       onRelayout: () => this.relayout(),
       emitChange: (type) => this.emitChange(type),
     });
+    // 剪贴板接线：场景以 consumer 身份注册到 Clipboard 插件（原生 copy/paste 事件
+    // 分发；未装配插件时 clipboard 为 null，复制/粘贴命令降级为无操作）
+    this.clipboard = this.app.capability(CLIPBOARD_CAPABILITY) ?? null;
+    if (this.clipboard) {
+      const unregister = this.clipboard.register({
+        kind: "mindmap",
+        serialize: () => this.operations.copySelection(),
+        deserialize: (entry) => void this.operations.pasteFromEntry(entry),
+        pasteText: (text) => void this.operations.pasteText(text),
+      });
+      // 注销并入 cleanups，destroy 时撤销事件分发参与
+      this.cleanups.push(unregister);
+    }
     this.keyboard = new KeyboardNav({
       model: this.model,
       sel: this.sel,

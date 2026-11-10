@@ -2,6 +2,7 @@ import type { App, Node, Text } from "@silker/core";
 import type { HistoryCapability, HistoryCommand } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import type { TextEditorCapability } from "@silker/core";
+import type { ClipboardEntry } from "@silker/core";
 import type { MindEdge } from "./Edge";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";
@@ -18,13 +19,9 @@ export interface NodeOperationsDeps {
   emitChange: (type: MindMapChangeType) => void;
 }
 
-// 节点操作：新建（Tab/Enter）、删除选中、复制/粘贴（原 MindMap 内联逻辑）。
-// clipboard 为复制/粘贴缓冲的唯一属主
+// 节点操作：新建（Tab/Enter）、删除选中、复制/粘贴。剪贴板机制在 plugin-clipboard
+//（原生 copy/paste 事件分发），本类只提供载荷的序列化/还原与外部文本建节点
 export class NodeOperations {
-  // 复制/粘贴缓冲：存放选中节点序列化后的子树数据（文本/自定义样式/折叠态/子孙），
-  // 复制允许多选整组入档，粘贴仅在单选激活时执行（见 pasteClipboard）
-  private clipboard: MindMapNode[] | null = null;
-
   constructor(private deps: NodeOperationsDeps) {}
 
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
@@ -157,11 +154,12 @@ export class NodeOperations {
     this.deps.emitChange("delete");
   }
 
-  // 复制选中节点：把各选中节点的子树序列化入剪贴板缓冲（多选可整组复制）。
+  // 复制选中节点：把各选中节点的子树序列化为剪贴板载荷（多选可整组复制）。
   // 沿祖先链过滤只留最顶层节点——子孙会随祖先子树整体序列化，若重复入队
-  // （选中 a、b、c 且 a→b→c），粘贴时同一分支会被添加两份
-  copySelection() {
-    if (!this.deps.sel.items.length) return;
+  // （选中 a、b、c 且 a→b→c），粘贴时同一分支会被添加两份。
+  // 无选中返回 null（copy 事件不拦截，放行原生行为）
+  copySelection(): ClipboardEntry | null {
+    if (!this.deps.sel.items.length) return null;
     const roots = [...this.deps.sel.items].filter((n) => {
       let p = n.parent as Text | null;
       while (p) {
@@ -170,14 +168,19 @@ export class NodeOperations {
       }
       return true;
     });
-    this.clipboard = roots.map((n) => this.deps.model.serializeNode(n));
+    return {
+      kind: "mindmap",
+      payload: roots.map((n) => this.deps.model.serializeNode(n)),
+      text: roots.map((n) => n.text).join("\n"),
+    };
   }
 
-  // 粘贴剪贴板：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序追加为激活节点
-  // 的子节点（追加在其子级末尾），样式按级数解析；随后激活最后一个粘贴节点并重布局，
-  // 整次粘贴记为一条可撤销的 add 命令
-  async pasteClipboard() {
-    if (!this.clipboard?.length || !this.deps.model.root) return;
+  // 粘贴剪贴板载荷：仅单选激活时执行（多选/无选中不粘贴）——复制的子树按序追加为
+  // 激活节点的子节点（追加在其子级末尾），样式按级数解析；随后激活最后一个粘贴节点
+  // 并重布局，整次粘贴记为一条可撤销的 add 命令
+  async pasteFromEntry(entry: ClipboardEntry) {
+    const nodes = entry.payload as MindMapNode[];
+    if (!Array.isArray(nodes) || !nodes.length || !this.deps.model.root) return;
     const anchor = this.deps.activation.active;
     if (!anchor) return;
     // 目标父级即激活节点，处于折叠态时先展开，避免粘贴节点被可见性联动隐藏
@@ -193,7 +196,7 @@ export class NodeOperations {
     // 与自定义样式/折叠态，子树内部连线在命令外定格创建
     // （redo/undo 只做挂载/摘除，重复创建会导致连线翻倍且撤销残留）
     const depth = this.deps.model.depthOf(parent) + 1;
-    const inserts = this.clipboard.map((data, i) => {
+    const inserts = nodes.map((data, i) => {
       // 粘贴前剥除 id：粘贴出的子树须是新节点（自动生成新 id），不与源子树共享 id
       const node = this.deps.model.renderNode(this.deps.model.stripIds(data), depth);
       const inner: MindEdge[] = [];
@@ -244,6 +247,55 @@ export class NodeOperations {
     await this.deps.onRelayout();
     // 最后一个粘贴节点进入激活态（常驻覆盖层，打字即编辑）
     this.deps.activation.activate(inserts[inserts.length - 1].node);
+    this.deps.emitChange("add");
+  }
+
+  // 粘贴外部纯文本：在激活节点下新建子节点承载文本（对齐 Figma/Miro 的跨应用
+  // 粘贴行为）。复用 createRelated 的 add 命令模式：样式按级数解析、追加到子级末尾、
+  // 走 history 可逆命令，随后激活新节点并重布局。无激活节点或空文本时忽略
+  async pasteText(text: string) {
+    const parent = this.deps.activation.active;
+    if (!parent || !text) return;
+    // 目标父级处于折叠态时先展开，避免新建节点被可见性联动隐藏
+    if (parent.collapsed) {
+      parent.collapsed = false;
+      this.deps.model.applyCollapseVisibility();
+    }
+    // 新节点级数 = 激活节点级数 + 1（按级数解析样式）
+    const depth = this.deps.model.depthOf(parent) + 1;
+    const style = this.deps.model.newNodeStyle(parent, depth);
+    // 插入位置在构造命令前定格：追加到子级末尾（统一走 index splice，
+    // undo/redo 重放同一索引，不依赖粘贴时的树状态）
+    const index = parent.children.length;
+    const node = this.deps.model.createNode(parent, style);
+    node.text = text;
+    const edge = this.deps.model.createEdge(parent, node);
+    const cmd: HistoryCommand = {
+      type: "add",
+      redo: () => {
+        parent.attachChild(node, index);
+        this.deps.app.add(edge);
+        this.deps.model.edges.push(edge);
+      },
+      undo: () => {
+        parent.detachChild(node);
+        this.deps.model.edges = this.deps.model.edges.filter((e) => e !== edge);
+        this.deps.app.remove(edge);
+      },
+      toJSON: () => ({
+        kind: "mindmap.add",
+        payload: {
+          parentId: parent.id,
+          index,
+          edgeId: edge.id,
+          node: this.deps.model.serializeForHistory(node),
+        },
+      }),
+    };
+    this.deps.history.exec(cmd);
+    this.deps.editor.bind(node);
+    await this.deps.onRelayout();
+    this.deps.activation.activate(node);
     this.deps.emitChange("add");
   }
 }

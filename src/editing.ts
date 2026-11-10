@@ -136,8 +136,10 @@ export class ActivationController {
 
   // 键位分发守卫：onGlobalKeydown 与命令插件共用。覆盖层持焦时普通按键由其 keydown
   // 处理器接管；修饰键组合（Ctrl/Cmd/Alt）仍走全局分发——否则激活态覆盖层会把
-  // Ctrl+C 的 "c" 当可打印字符唤醒编辑态。编辑态下撤销/复制交给输入框原生行为，
-  // 组合键一律不拦。仅响应画布、页面空白处与覆盖层（未编辑时）的按键，页面其它控件输入不受影响
+  // Ctrl+C 的 "c" 当可打印字符唤醒编辑态（复制/粘贴已改走原生剪贴板事件，不经
+  // keydown 分发；此处修饰键放行仅服务撤销/全选等剩余命令键）。
+  // 编辑态下撤销交给输入框原生行为，组合键一律不拦。
+  // 仅响应画布、页面空白处与覆盖层（未编辑时）的按键，页面其它控件输入不受影响
   keymapGuard(e: KeyboardEvent): boolean {
     if (
       this.deps.editor.hasFocus() &&
