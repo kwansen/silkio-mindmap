@@ -39,6 +39,8 @@ import Trash from "../icons/Trash.vue";
 import Chevron from "../icons/Chevron.vue";
 import Sparkles from "../icons/Sparkles.vue";
 import Settings from "../icons/Settings.vue";
+import ArrowUp from "../icons/ArrowUp.vue";
+import Stop from "../icons/Stop.vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
 
@@ -159,6 +161,8 @@ const aiPending = ref<{ reasoning: string; content: string } | null>(null);
 const aiSidebarOpen = ref(true);
 const aiPrompt = ref("");
 const aiBusy = ref(false);
+// 当前 AI 请求的中止控制器：停止按钮 abort 它以取消进行中的生成（fetch 与流式读取一并中断）
+let aiAbort: AbortController | null = null;
 const aiSettingsOpen = ref(false);
 const chatBox = ref<HTMLDivElement | null>(null);
 
@@ -220,12 +224,15 @@ const realGenerate: AIEditGenerate = async (req) => {
     aiPending.value.reasoning = "";
     aiPending.value.content = "";
   }
+  const ac = new AbortController();
+  aiAbort = ac;
   const res = await fetch(baseURL.replace(/\/+$/, "") + "/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal: ac.signal,
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: defaultAIEditPrompt(req) }],
@@ -336,6 +343,17 @@ async function sendAi() {
     });
   } catch (e) {
     if (currentId.value !== sentDocId) return;
+    // 用户主动停止：不算错误，保留已流式产生的部分回答（无内容则给提示）
+    if (e instanceof DOMException && e.name === "AbortError") {
+      const partial = aiPending.value?.content ?? "";
+      aiMessages.value.push({
+        id: replyId,
+        role: "assistant",
+        text: partial && !isOpsStream(partial) ? partial : "（已停止生成）",
+        reasoning: aiPending.value?.reasoning || undefined,
+      });
+      return;
+    }
     aiMessages.value.push({
       id: replyId,
       role: "error",
@@ -344,7 +362,13 @@ async function sendAi() {
   } finally {
     aiBusy.value = false;
     aiPending.value = null;
+    aiAbort = null;
   }
+}
+
+// 停止正在进行的 AI 生成：中断请求与流式读取，回到可继续输入状态
+function stopAi() {
+  aiAbort?.abort();
 }
 
 // 清空 AI 对话流：新建/切换导图时调用，避免旧文档的指令与回答污染新文档的对话
@@ -1135,12 +1159,19 @@ onUnmounted(() => {
           placeholder="输入指令或提问…"
           @keydown.enter="sendAi"
         />
+        <!-- 空闲时发送（向上箭头）；生成中变停止按钮，点击中止本次 AI 请求 -->
         <button
-          class="h-9 shrink-0 cursor-pointer rounded-lg bg-violet-500 px-3.5 text-xs text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="aiBusy || !aiPrompt.trim()"
-          @click="sendAi"
+          class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-white disabled:cursor-not-allowed disabled:opacity-50"
+          :class="
+            aiBusy ? 'bg-gray-900 hover:bg-gray-700' : 'bg-violet-500 hover:bg-violet-600'
+          "
+          :disabled="!aiBusy && !aiPrompt.trim()"
+          :title="aiBusy ? '停止生成' : '发送'"
+          :aria-label="aiBusy ? '停止生成' : '发送'"
+          @click="aiBusy ? stopAi() : sendAi()"
         >
-          {{ aiBusy ? "思考中…" : "发送" }}
+          <Stop v-if="aiBusy" class="h-3.5 w-3.5" />
+          <ArrowUp v-else class="h-4 w-4" />
         </button>
       </div>
     </div>

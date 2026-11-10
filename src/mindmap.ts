@@ -496,8 +496,8 @@ export class MindMap {
     this.model.applyCollapseVisibility();
     await this.layout.layout(root, {
       direction: this.direction,
-      levelGap: 80,
-      siblingGap: 20,
+      levelGap: 48,
+      siblingGap: 12,
     });
     this.pan!.center(this.model.getBounds(root));
     // destroy 可能先于异步布局完成：已拆卸则不再挂载任何节点
@@ -522,8 +522,8 @@ export class MindMap {
     this.model.applyCollapseVisibility();
     await this.layout.layout(this.model.root, {
       direction: this.direction,
-      levelGap: 80,
-      siblingGap: 20,
+      levelGap: 48,
+      siblingGap: 12,
     });
     this.app.requestRender();
     // 布局会移动节点，编辑框必须在对齐一次，否则覆盖在旧位置上
