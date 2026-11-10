@@ -21,6 +21,7 @@ import {
   type MindMapNode,
   type Style,
 } from "@silker/mindmap";
+import { Markdown } from "@comark/vue";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import Undo from "../icons/Undo.vue";
 import Redo from "../icons/Redo.vue";
@@ -151,8 +152,10 @@ interface AIChatMessage {
 }
 let aiMsgSeq = 0;
 const aiMessages = ref<AIChatMessage[]>([]);
-// 进行中的回复：流式思考实时更新，完成后并入 aiMessages
-const aiPending = ref<{ reasoning: string } | null>(null);
+// 进行中的回复：流式思考与回答文本实时更新，完成后并入 aiMessages
+// content 为 SSE 累积的回答原文，经 comark 流式渲染；编辑类指令输出的是操作
+// JSON（isOpsStream 命中），不实时渲染，等控制器解析后以反馈链展示
+const aiPending = ref<{ reasoning: string; content: string } | null>(null);
 const aiSidebarOpen = ref(true);
 const aiPrompt = ref("");
 const aiBusy = ref(false);
@@ -213,7 +216,10 @@ const realGenerate: AIEditGenerate = async (req) => {
   const { baseURL, apiKey, model } = aiConfig.value;
   if (!baseURL || !apiKey || !model)
     throw new Error("请先点击右上角齿轮配置 AI 服务");
-  if (aiPending.value) aiPending.value.reasoning = "";
+  if (aiPending.value) {
+    aiPending.value.reasoning = "";
+    aiPending.value.content = "";
+  }
   const res = await fetch(baseURL.replace(/\/+$/, "") + "/chat/completions", {
     method: "POST",
     headers: {
@@ -265,7 +271,11 @@ const realGenerate: AIEditGenerate = async (req) => {
         const think = delta.reasoning_content ?? delta.reasoning;
         if (typeof think === "string" && think && aiPending.value)
           aiPending.value.reasoning += think;
-        if (typeof delta.content === "string") content += delta.content;
+        if (typeof delta.content === "string" && delta.content) {
+          content += delta.content;
+          // 流式回答实时并入进行中消息，由 comark 流式渲染
+          if (aiPending.value) aiPending.value.content = content;
+        }
       } catch {
         // 忽略无法解析的行（心跳/注释等）
       }
@@ -274,6 +284,13 @@ const realGenerate: AIEditGenerate = async (req) => {
   if (!content) throw new Error("AI 服务返回内容为空");
   return content;
 };
+
+// 流式内容是否为操作 JSON（编辑类指令的输出）：JSON 输出等控制器解析完成后以
+// 反馈链展示，不实时渲染原始 JSON；纯文本回答才走 comark 流式渲染
+function isOpsStream(text: string): boolean {
+  const s = text.trimStart();
+  return s.startsWith("{") || s.startsWith("[") || s.startsWith("```");
+}
 
 // 发送消息：编辑类指令产出一个原子变更（可整体撤销），提问类返回回答；
 // 全部对话（指令/回答/反馈/思考）保留在消息流中
@@ -305,7 +322,7 @@ async function sendAi() {
   const replyId = ++aiMsgSeq;
   const sentDocId = currentId.value;
   aiBusy.value = true;
-  aiPending.value = { reasoning: "" };
+  aiPending.value = { reasoning: "", content: "" };
   try {
     const r = await mindmap.ai.run(prompt, { history });
     // 等待期间切换/新建了导图：旧文档的回复不落入新对话流
@@ -681,21 +698,374 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <canvas ref="canvasRef" class="block h-screen w-screen bg-white"></canvas>
+  <!-- 整体布局：画布区（flex-1）与 AI 侧边栏并列，侧边栏为布局元素而非悬浮层 -->
+  <div class="flex h-screen w-screen overflow-hidden">
+    <!-- 画布区：悬浮控件锚定于此容器，宽度随侧边栏开合自动伸缩 -->
+    <div class="relative min-w-0 flex-1">
+      <canvas ref="canvasRef" class="block h-full w-full bg-white"></canvas>
 
-  <!-- 文档切换器：点击弹出 dialog（新建导图 / 排序 / 打开历史导图 / 删除） -->
-  <div class="fixed top-4 left-4 z-10">
-    <button
-      class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
-      title="导图列表"
-      @click="docsOpen = true"
+      <!-- 文档切换器：点击弹出 dialog（新建导图 / 排序 / 打开历史导图 / 删除） -->
+      <div class="absolute top-4 left-4 z-10">
+        <button
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+          title="导图列表"
+          @click="docsOpen = true"
+        >
+          <File class="h-4 w-4 shrink-0 text-gray-500" />
+          <span class="max-w-40 truncate text-xs text-gray-800">
+            {{ docName || "加载中…" }}
+          </span>
+          <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
+        </button>
+      </div>
+
+      <!-- 单一胶囊工具条：撤销/重做可点击，其余项悬浮展开选项面板 -->
+      <div
+        class="absolute top-4 right-4 z-10 flex items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+      >
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
+          :disabled="!canUndo"
+          title="撤销"
+          aria-label="撤销"
+          @click="undo"
+        >
+          <Undo class="block h-4 w-4 shrink-0" />
+        </button>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
+          :disabled="!canRedo"
+          title="重做"
+          aria-label="重做"
+          @click="redo"
+        >
+          <Redo class="block h-4 w-4 shrink-0" />
+        </button>
+
+        <!-- 布局方向设置：横向（right）/ 左向（left）/ 双向平衡（both）/ 组织结构图（down） -->
+        <div class="group relative">
+          <button
+            class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+            title="布局方向"
+          >
+            <component :is="layoutIcons[layout]" class="block h-4 w-4 shrink-0" />
+          </button>
+          <div
+            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+          >
+            <button
+              v-for="opt in layoutOptions"
+              :key="opt.value"
+              class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
+              :class="{ 'bg-[#e5edff] text-blue-700': layout === opt.value }"
+              :title="opt.title"
+              @click="pickLayout(opt.value)"
+            >
+              <component :is="layoutIcons[opt.value]" class="h-9 w-9 shrink-0" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 连线形状设置 -->
+        <div class="group relative">
+          <button
+            class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+            title="连线形状"
+          >
+            <component :is="edgeIcons[edge]" class="block h-4 w-4 shrink-0" />
+          </button>
+          <div
+            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+          >
+            <button
+              v-for="opt in edgeOptions"
+              :key="opt.value"
+              class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
+              :class="{ 'bg-[#e5edff] text-blue-700': edge === opt.value }"
+              :title="opt.title"
+              @click="pickEdge(opt.value)"
+            >
+              <component :is="edgeIcons[opt.value]" class="h-9 w-9 shrink-0" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
+        <div class="group relative">
+          <button
+            class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+            title="导出"
+          >
+            <Export class="block h-4 w-4 shrink-0" />
+          </button>
+          <div
+            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+          >
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              @click="copyJson"
+            >
+              {{ copied ? "已复制" : "复制 JSON" }}
+            </button>
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              @click="exportJson"
+            >
+              导出 JSON
+            </button>
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              @click="exportImage"
+            >
+              导出图片
+            </button>
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              @click="exportImageHd"
+            >
+              导出图片（2倍高清）
+            </button>
+          </div>
+        </div>
+
+        <!-- 缩放：数字触发器 + 滑块面板 -->
+        <div class="group relative">
+          <button
+            class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+            title="缩放"
+          >
+            <span class="text-[11px] tabular-nums">{{ zoom }}</span>
+          </button>
+          <div
+            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+          >
+            <input
+              class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+              :style="zoomTrackStyle"
+              type="range"
+              min="20"
+              max="800"
+              :value="zoom"
+              step="5"
+              @input="onZoomInput"
+            />
+          </div>
+        </div>
+
+        <!-- AI 侧边栏开关 -->
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm hover:bg-gray-100"
+          :class="aiSidebarOpen ? 'text-violet-500' : 'text-gray-800'"
+          title="AI 助手"
+          @click="aiSidebarOpen = !aiSidebarOpen"
+        >
+          <Sparkles class="block h-4 w-4 shrink-0" />
+        </button>
+      </div>
+    </div>
+
+    <!-- AI 助手侧边栏：布局内并列面板（非悬浮层），历史消息保留（用户指令 / AI 回答 / 执行反馈 / 思考过程） -->
+    <div
+      v-if="aiSidebarOpen"
+      class="flex h-full w-90 shrink-0 flex-col border-l border-gray-100 bg-white"
     >
-      <File class="h-4 w-4 shrink-0 text-gray-500" />
-      <span class="max-w-40 truncate text-xs text-gray-800">
-        {{ docName || "加载中…" }}
-      </span>
-      <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
-    </button>
+      <!-- 头部 -->
+      <div class="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
+        <Sparkles class="h-4 w-4 text-violet-500" />
+        <span class="flex-1 text-sm font-medium text-gray-800">AI 助手</span>
+        <button
+          class="cursor-pointer text-xs text-gray-400 hover:text-gray-600"
+          :disabled="aiBusy || !aiMessages.length"
+          @click="aiMessages = []"
+        >
+          清空
+        </button>
+        <button
+          class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg hover:bg-gray-100"
+          :class="aiReady ? 'text-violet-500' : 'text-gray-400'"
+          title="AI 服务配置"
+          @click="aiSettingsOpen = !aiSettingsOpen"
+        >
+          <Settings class="h-4 w-4" />
+        </button>
+        <button
+          class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
+          title="收起"
+          @click="aiSidebarOpen = false"
+        >
+          <Chevron class="h-4 w-4" />
+        </button>
+      </div>
+
+      <!-- 服务配置（OpenAI 兼容接口，localStorage 持久化） -->
+      <div
+        v-if="aiSettingsOpen"
+        class="flex flex-col gap-2 border-b border-gray-100 bg-gray-50 p-3"
+      >
+        <input
+          v-model="aiConfig.baseURL"
+          class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
+          placeholder="接口地址（含 /v1），如 https://api.deepseek.com/v1"
+        />
+        <input
+          v-model="aiConfig.apiKey"
+          class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
+          type="password"
+          placeholder="API Key"
+        />
+        <input
+          v-model="aiConfig.model"
+          class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
+          placeholder="模型名，如 deepseek-chat"
+        />
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] text-gray-400"
+            >保存在浏览器本地；服务端需允许跨域或走本地代理</span
+          >
+          <button
+            class="h-7 shrink-0 cursor-pointer rounded-lg bg-gray-900 px-3 text-xs text-white hover:bg-gray-700"
+            @click="saveAIConfig"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+
+      <!-- 消息流 -->
+      <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <div
+          v-if="!aiMessages.length && !aiPending"
+          class="mt-10 text-center text-xs leading-5 text-gray-400"
+        >
+          输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 /
+          这个导图讲了什么<br />
+          撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如
+          "线性代数/矩阵"
+        </div>
+
+        <div v-for="m in aiMessages" :key="m.id">
+          <!-- 用户指令：右侧气泡 -->
+          <div v-if="m.role === 'user'" class="flex justify-end">
+            <div
+              class="max-w-[85%] rounded-xl rounded-br-sm bg-violet-500 px-3 py-2 text-xs leading-5 text-white"
+            >
+              {{ m.text }}
+            </div>
+          </div>
+          <!-- 错误 -->
+          <div
+            v-else-if="m.role === 'error'"
+            class="text-xs leading-5 text-red-500"
+          >
+            {{ m.text }}
+          </div>
+          <!-- AI 回复：思考过程（可折叠）+ 回答 + 执行反馈链 -->
+          <div v-else class="flex flex-col gap-2">
+            <details
+              v-if="m.reasoning"
+              class="rounded-lg bg-gray-50 px-2.5 py-1.5"
+            >
+              <summary class="cursor-pointer text-xs text-gray-400 select-none">
+                思考过程
+              </summary>
+              <div
+                class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
+              >
+                {{ m.reasoning }}
+              </div>
+            </details>
+            <!-- Markdown 为 async setup 组件，须置于 Suspense 内；操作 JSON 形态的
+                 原文（模型坏 JSON 时控制器整体作为回答返回）退回纯文本展示 -->
+            <Suspense v-if="m.text && !isOpsStream(m.text)">
+              <Markdown
+                :value="m.text"
+                class="ai-md text-xs leading-5 text-gray-600"
+              />
+            </Suspense>
+            <div
+              v-else-if="m.text"
+              class="text-xs leading-5 whitespace-pre-wrap text-gray-600"
+            >
+              {{ m.text }}
+            </div>
+            <div v-if="m.steps?.length" class="flex flex-col gap-1">
+              <div
+                v-for="(s, i) in m.steps"
+                :key="i"
+                class="flex items-start gap-1.5 text-xs leading-5"
+              >
+                <span
+                  :class="
+                    s.status === 'applied' ? 'text-emerald-500' : 'text-gray-300'
+                  "
+                  >{{ s.status === "applied" ? "✓" : "–" }}</span
+                >
+                <span
+                  :class="
+                    s.status === 'applied' ? 'text-gray-600' : 'text-gray-400'
+                  "
+                  >{{ s.label }}</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 进行中：流式思考实时展示；回答文本经 comark 流式渲染（编辑类 JSON
+             输出只显示占位，等解析完成后以反馈链展示） -->
+        <div v-if="aiPending" class="flex flex-col gap-2">
+          <details
+            v-if="aiPending.reasoning"
+            open
+            class="rounded-lg bg-gray-50 px-2.5 py-1.5"
+          >
+            <summary class="cursor-pointer text-xs text-gray-400 select-none">
+              思考中…
+            </summary>
+            <div
+              class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
+            >
+              {{ aiPending.reasoning }}
+            </div>
+          </details>
+          <Suspense
+            v-if="aiPending.content && !isOpsStream(aiPending.content)"
+          >
+            <Markdown
+              :value="aiPending.content"
+              streaming
+              :caret="{ class: 'comark-caret' }"
+              class="ai-md text-xs leading-5 text-gray-600"
+            />
+          </Suspense>
+          <div
+            v-else-if="!aiPending.reasoning"
+            class="flex items-center gap-1.5 text-xs text-gray-400"
+          >
+            <Sparkles class="h-3.5 w-3.5 animate-pulse text-violet-400" />
+            {{ isOpsStream(aiPending.content) ? "执行操作中…" : "思考中…" }}
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入区 -->
+      <div class="flex items-center gap-2 border-t border-gray-100 p-2.5">
+        <input
+          v-model="aiPrompt"
+          class="h-9 min-w-0 flex-1 rounded-lg bg-gray-50 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 disabled:opacity-60"
+          :disabled="aiBusy"
+          placeholder="输入指令或提问…"
+          @keydown.enter="sendAi"
+        />
+        <button
+          class="h-9 shrink-0 cursor-pointer rounded-lg bg-violet-500 px-3.5 text-xs text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="aiBusy || !aiPrompt.trim()"
+          @click="sendAi"
+        >
+          {{ aiBusy ? "思考中…" : "发送" }}
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- 文档 dialog：遮罩点击关闭，列表按创建/更新时间排序，点击条目打开导图 -->
@@ -783,329 +1153,4 @@ onUnmounted(() => {
       </div>
     </div>
   </Teleport>
-
-  <!-- 单一胶囊工具条：撤销/重做可点击，其余项悬浮展开选项面板 -->
-  <div
-    class="fixed top-4 right-4 z-10 flex items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
-  >
-    <button
-      class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
-      :disabled="!canUndo"
-      title="撤销"
-      aria-label="撤销"
-      @click="undo"
-    >
-      <Undo class="block h-4 w-4 shrink-0" />
-    </button>
-    <button
-      class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
-      :disabled="!canRedo"
-      title="重做"
-      aria-label="重做"
-      @click="redo"
-    >
-      <Redo class="block h-4 w-4 shrink-0" />
-    </button>
-
-    <!-- 布局方向设置：横向（right）/ 左向（left）/ 双向平衡（both）/ 组织结构图（down） -->
-    <div class="group relative">
-      <button
-        class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-        title="布局方向"
-      >
-        <component :is="layoutIcons[layout]" class="block h-4 w-4 shrink-0" />
-      </button>
-      <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
-      >
-        <button
-          v-for="opt in layoutOptions"
-          :key="opt.value"
-          class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
-          :class="{ 'bg-[#e5edff] text-blue-700': layout === opt.value }"
-          :title="opt.title"
-          @click="pickLayout(opt.value)"
-        >
-          <component :is="layoutIcons[opt.value]" class="h-9 w-9 shrink-0" />
-        </button>
-      </div>
-    </div>
-
-    <!-- 连线形状设置 -->
-    <div class="group relative">
-      <button
-        class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-        title="连线形状"
-      >
-        <component :is="edgeIcons[edge]" class="block h-4 w-4 shrink-0" />
-      </button>
-      <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
-      >
-        <button
-          v-for="opt in edgeOptions"
-          :key="opt.value"
-          class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
-          :class="{ 'bg-[#e5edff] text-blue-700': edge === opt.value }"
-          :title="opt.title"
-          @click="pickEdge(opt.value)"
-        >
-          <component :is="edgeIcons[opt.value]" class="h-9 w-9 shrink-0" />
-        </button>
-      </div>
-    </div>
-
-    <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
-    <div class="group relative">
-      <button
-        class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-        title="导出"
-      >
-        <Export class="block h-4 w-4 shrink-0" />
-      </button>
-      <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
-      >
-        <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
-          @click="copyJson"
-        >
-          {{ copied ? "已复制" : "复制 JSON" }}
-        </button>
-        <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
-          @click="exportJson"
-        >
-          导出 JSON
-        </button>
-        <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
-          @click="exportImage"
-        >
-          导出图片
-        </button>
-        <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
-          @click="exportImageHd"
-        >
-          导出图片（2倍高清）
-        </button>
-      </div>
-    </div>
-
-    <!-- 缩放：数字触发器 + 滑块面板 -->
-    <div class="group relative">
-      <button
-        class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-        title="缩放"
-      >
-        <span class="text-[11px] tabular-nums">{{ zoom }}</span>
-      </button>
-      <div
-        class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
-      >
-        <input
-          class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
-          :style="zoomTrackStyle"
-          type="range"
-          min="20"
-          max="800"
-          :value="zoom"
-          step="5"
-          @input="onZoomInput"
-        />
-      </div>
-    </div>
-  </div>
-
-  <!-- AI 助手侧边栏：对话式交互，历史消息保留（用户指令 / AI 回答 / 执行反馈 / 思考过程） -->
-  <div
-    v-if="aiSidebarOpen"
-    class="fixed top-0 right-0 z-20 flex h-full w-90 max-w-[92vw] flex-col bg-white shadow-[-8px_0_24px_rgba(0,0,0,0.08)]"
-  >
-    <!-- 头部 -->
-    <div class="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
-      <Sparkles class="h-4 w-4 text-violet-500" />
-      <span class="flex-1 text-sm font-medium text-gray-800">AI 助手</span>
-      <button
-        class="cursor-pointer text-xs text-gray-400 hover:text-gray-600"
-        :disabled="aiBusy || !aiMessages.length"
-        @click="aiMessages = []"
-      >
-        清空
-      </button>
-      <button
-        class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg hover:bg-gray-100"
-        :class="aiReady ? 'text-violet-500' : 'text-gray-400'"
-        title="AI 服务配置"
-        @click="aiSettingsOpen = !aiSettingsOpen"
-      >
-        <Settings class="h-4 w-4" />
-      </button>
-      <button
-        class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
-        title="收起"
-        @click="aiSidebarOpen = false"
-      >
-        <Chevron class="h-4 w-4" />
-      </button>
-    </div>
-
-    <!-- 服务配置（OpenAI 兼容接口，localStorage 持久化） -->
-    <div
-      v-if="aiSettingsOpen"
-      class="flex flex-col gap-2 border-b border-gray-100 bg-gray-50 p-3"
-    >
-      <input
-        v-model="aiConfig.baseURL"
-        class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
-        placeholder="接口地址（含 /v1），如 https://api.deepseek.com/v1"
-      />
-      <input
-        v-model="aiConfig.apiKey"
-        class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
-        type="password"
-        placeholder="API Key"
-      />
-      <input
-        v-model="aiConfig.model"
-        class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
-        placeholder="模型名，如 deepseek-chat"
-      />
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] text-gray-400"
-          >保存在浏览器本地；服务端需允许跨域或走本地代理</span
-        >
-        <button
-          class="h-7 shrink-0 cursor-pointer rounded-lg bg-gray-900 px-3 text-xs text-white hover:bg-gray-700"
-          @click="saveAIConfig"
-        >
-          保存
-        </button>
-      </div>
-    </div>
-
-    <!-- 消息流 -->
-    <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
-      <div
-        v-if="!aiMessages.length && !aiPending"
-        class="mt-10 text-center text-xs leading-5 text-gray-400"
-      >
-        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 /
-        这个导图讲了什么<br />
-        撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如
-        "线性代数/矩阵"
-      </div>
-
-      <div v-for="m in aiMessages" :key="m.id">
-        <!-- 用户指令：右侧气泡 -->
-        <div v-if="m.role === 'user'" class="flex justify-end">
-          <div
-            class="max-w-[85%] rounded-xl rounded-br-sm bg-violet-500 px-3 py-2 text-xs leading-5 text-white"
-          >
-            {{ m.text }}
-          </div>
-        </div>
-        <!-- 错误 -->
-        <div
-          v-else-if="m.role === 'error'"
-          class="text-xs leading-5 text-red-500"
-        >
-          {{ m.text }}
-        </div>
-        <!-- AI 回复：思考过程（可折叠）+ 回答 + 执行反馈链 -->
-        <div v-else class="flex flex-col gap-2">
-          <details
-            v-if="m.reasoning"
-            class="rounded-lg bg-gray-50 px-2.5 py-1.5"
-          >
-            <summary class="cursor-pointer text-xs text-gray-400 select-none">
-              思考过程
-            </summary>
-            <div
-              class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
-            >
-              {{ m.reasoning }}
-            </div>
-          </details>
-          <div
-            v-if="m.text"
-            class="text-xs leading-5 whitespace-pre-wrap text-gray-600"
-          >
-            {{ m.text }}
-          </div>
-          <div v-if="m.steps?.length" class="flex flex-col gap-1">
-            <div
-              v-for="(s, i) in m.steps"
-              :key="i"
-              class="flex items-start gap-1.5 text-xs leading-5"
-            >
-              <span
-                :class="
-                  s.status === 'applied' ? 'text-emerald-500' : 'text-gray-300'
-                "
-                >{{ s.status === "applied" ? "✓" : "–" }}</span
-              >
-              <span
-                :class="
-                  s.status === 'applied' ? 'text-gray-600' : 'text-gray-400'
-                "
-                >{{ s.label }}</span
-              >
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 进行中：流式思考实时展示 -->
-      <div v-if="aiPending" class="flex flex-col gap-2">
-        <details
-          v-if="aiPending.reasoning"
-          open
-          class="rounded-lg bg-gray-50 px-2.5 py-1.5"
-        >
-          <summary class="cursor-pointer text-xs text-gray-400 select-none">
-            思考中…
-          </summary>
-          <div
-            class="mt-1 text-[11px] leading-5 whitespace-pre-wrap text-gray-400"
-          >
-            {{ aiPending.reasoning }}
-          </div>
-        </details>
-        <div v-else class="flex items-center gap-1.5 text-xs text-gray-400">
-          <Sparkles class="h-3.5 w-3.5 animate-pulse text-violet-400" />
-          思考中…
-        </div>
-      </div>
-    </div>
-
-    <!-- 输入区 -->
-    <div class="flex items-center gap-2 border-t border-gray-100 p-2.5">
-      <input
-        v-model="aiPrompt"
-        class="h-9 min-w-0 flex-1 rounded-lg bg-gray-50 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 disabled:opacity-60"
-        :disabled="aiBusy"
-        placeholder="输入指令或提问…"
-        @keydown.enter="sendAi"
-      />
-      <button
-        class="h-9 shrink-0 cursor-pointer rounded-lg bg-violet-500 px-3.5 text-xs text-white hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="aiBusy || !aiPrompt.trim()"
-        @click="sendAi"
-      >
-        {{ aiBusy ? "思考中…" : "发送" }}
-      </button>
-    </div>
-  </div>
-
-  <!-- 侧边栏收起时的悬浮入口 -->
-  <button
-    v-if="!aiSidebarOpen"
-    class="fixed top-4 right-4 z-20 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-white shadow-[0_4px_16px_rgba(0,0,0,0.12)] hover:bg-gray-50"
-    title="AI 助手"
-    @click="aiSidebarOpen = true"
-  >
-    <Sparkles class="h-4 w-4 text-violet-500" />
-  </button>
 </template>
