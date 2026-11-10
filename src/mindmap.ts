@@ -62,7 +62,7 @@ export class MindMap {
   // 各结构变更路径经 relayout 按能力键消费，注册表缺失属于装配错误（require 兜底）
   private layout!: AutoLayoutCapability;
   // 命令与键位能力：动作注册为命令、按键统一分发（撤销/删除等默认键位见构造器；
-  // 复制/粘贴走原生剪贴板事件，不经 keydown 分发）
+  // 复制走 mod+c 命令写系统剪贴板，粘贴走原生 paste 事件，不绑 mod+v）
   private commands!: CommandCapability;
   // 剪贴板能力（Clipboard 插件 install 时注册，未装配时为 null——复制/粘贴命令降级为无操作）：
   // 场景以 consumer 身份参与 copy/paste 事件分发
@@ -124,6 +124,10 @@ export class MindMap {
       title: "复制选中",
       run: () => {
         const entry = this.operations.copySelection();
+        console.log(
+          "[clipdbg] mindmap.copy command: entry=", entry?.kind ?? null,
+          "clipboard=", this.clipboard ? "ok" : "NULL",
+        );
         if (entry) void this.clipboard?.write(entry);
       },
     });
@@ -149,6 +153,9 @@ export class MindMap {
     this.commands.bind("mod+z", "mindmap.undo");
     this.commands.bind("mod+shift+z", "mindmap.redo");
     this.commands.bind("mod+y", "mindmap.redo");
+    // mod+c 绑复制命令（写系统剪贴板；Chrome 无选区时 Ctrl+C 不派发 copy 事件，
+    // 需命令路径兜底）；粘贴不绑 mod+v——paste 事件必发且零权限，走原生事件分发
+    this.commands.bind("mod+c", "mindmap.copy");
     this.commands.bind("delete", "mindmap.delete");
     this.commands.bind("backspace", "mindmap.delete");
     // 插件 install 时自注册视口能力，此处按能力协议显式依赖（只认能力名与契约，不认插件实例）
@@ -242,12 +249,15 @@ export class MindMap {
     // 剪贴板接线：场景以 consumer 身份注册到 Clipboard 插件（原生 copy/paste 事件
     // 分发；未装配插件时 clipboard 为 null，复制/粘贴命令降级为无操作）
     this.clipboard = this.app.capability(CLIPBOARD_CAPABILITY) ?? null;
+    console.log("[clipdbg] MindMap clipboard capability:", this.clipboard ? "found" : "NULL");
     if (this.clipboard) {
       const unregister = this.clipboard.register({
         kind: "mindmap",
         serialize: () => this.operations.copySelection(),
         deserialize: (entry) => void this.operations.pasteFromEntry(entry),
         pasteText: (text) => void this.operations.pasteText(text),
+        // 编辑会话中 copy/paste 事件放行原生文本行为（常驻覆盖层不能凭元素类型判定）
+        isEditing: () => this.activation.editing,
       });
       // 注销并入 cleanups，destroy 时撤销事件分发参与
       this.cleanups.push(unregister);

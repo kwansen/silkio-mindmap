@@ -134,25 +134,24 @@ export class ActivationController {
     this.deps.emitChange("text");
   }
 
-  // 键位分发守卫：onGlobalKeydown 与命令插件共用。覆盖层持焦时普通按键由其 keydown
-  // 处理器接管；修饰键组合（Ctrl/Cmd/Alt）仍走全局分发——否则激活态覆盖层会把
-  // Ctrl+C 的 "c" 当可打印字符唤醒编辑态（复制/粘贴已改走原生剪贴板事件，不经
-  // keydown 分发；此处修饰键放行仅服务撤销/全选等剩余命令键）。
-  // 编辑态下撤销交给输入框原生行为，组合键一律不拦。
-  // 仅响应画布、页面空白处与覆盖层（未编辑时）的按键，页面其它控件输入不受影响
+  // 键位分发守卫：onGlobalKeydown 与命令插件共用。
+  // 覆盖层持焦 + 编辑态：普通按键归输入（false）；仅放行 Ctrl+C/X 复制/剪切当前
+  // 节点子树（已有文字选区时归原生复制文字）；mod+a 全选文字、mod+z 撤销等其余
+  // 组合键归覆盖层原生行为，不进画布命令分发。
+  // 覆盖层持焦 + 激活态：修饰键组合放行命令分发（撤销/全选画布），普通按键归输入。
+  // 未持焦（激活态）：仅响应画布与页面空白处的按键，页面其它控件输入不受影响
   keymapGuard(e: KeyboardEvent): boolean {
-    if (
-      this.deps.editor.hasFocus() &&
-      (this.editing || !(e.ctrlKey || e.metaKey || e.altKey))
-    ) {
-      return false;
+    const focus = this.deps.editor.hasFocus();
+    const modifiers = e.ctrlKey || e.metaKey || e.altKey;
+    if (focus && !modifiers) return false;
+    if (focus && this.editing) {
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "x") return false;
+      const sel = typeof window !== "undefined" ? window.getSelection?.() : null;
+      if (sel && !sel.isCollapsed) return false;
     }
-    const target = e.target as HTMLElement;
-    return (
-      this.deps.editor.hasFocus() ||
-      target === document.body ||
-      target === this.deps.app.canvas
-    );
+    return focus || (e.target as HTMLElement) === document.body ||
+      (e.target as HTMLElement) === this.deps.app.canvas;
   }
 
   // 按编辑状态切换高亮环颜色并重绘（激活蓝色 / 编辑紫色）
@@ -251,7 +250,9 @@ export class ActivationController {
         this.wake(true);
         return;
       }
-      // 覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
+      // 编辑态：左键按下交给原生行为（光标定位、拖动选择文字），不建立节点拖拽上下文
+      if (this.editing) return;
+      // 激活态覆盖层恰好盖住激活节点：命中即它本身；根节点不可拖时仅记录按下位置供 mouseup 判定点击
       this.deps.onNodePress(e);
     });
   }

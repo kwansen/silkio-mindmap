@@ -28,7 +28,7 @@ export class KeyboardNav {
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
   onGlobalKeydown = (e: KeyboardEvent) => {
     // 撤销/重做/删除已注册为命令并绑定键位（构造器），由命令插件统一分发；
-    // 复制/粘贴走原生剪贴板事件（Clipboard 插件），不经 keydown；
+    // 复制走 mod+c 命令（写系统剪贴板），粘贴走原生 paste 事件（Clipboard 插件）；
     // 此处只处理领域语义按键（Tab/Enter 新建、方向键导航、打字唤醒编辑态）
     if (!this.deps.activation.keymapGuard(e)) return;
     if (e.key === "Tab" || e.key === "Enter") {

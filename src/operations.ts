@@ -157,10 +157,19 @@ export class NodeOperations {
   // 复制选中节点：把各选中节点的子树序列化为剪贴板载荷（多选可整组复制）。
   // 沿祖先链过滤只留最顶层节点——子孙会随祖先子树整体序列化，若重复入队
   // （选中 a、b、c 且 a→b→c），粘贴时同一分支会被添加两份。
-  // 无选中返回 null（copy 事件不拦截，放行原生行为）
+  // 无选中时兜底当前激活节点（编辑态光标折叠复制节点走此路径）；
+  // 均无返回 null（copy 事件不拦截，放行原生行为）
   copySelection(): ClipboardEntry | null {
-    if (!this.deps.sel.items.length) return null;
-    const roots = [...this.deps.sel.items].filter((n) => {
+    const items = this.deps.sel.items.length
+      ? [...this.deps.sel.items]
+      : this.deps.activation.active
+        ? [this.deps.activation.active]
+        : [];
+    if (!items.length) {
+      console.log("[clipdbg] copySelection: no selection/active");
+      return null;
+    }
+    const roots = items.filter((n) => {
       let p = n.parent as Text | null;
       while (p) {
         if (this.deps.sel.has(p)) return false;
@@ -168,6 +177,7 @@ export class NodeOperations {
       }
       return true;
     });
+    console.log("[clipdbg] copySelection roots=", roots.map((n) => n.text));
     return {
       kind: "mindmap",
       payload: roots.map((n) => this.deps.model.serializeNode(n)),
@@ -180,6 +190,11 @@ export class NodeOperations {
   // 并重布局，整次粘贴记为一条可撤销的 add 命令
   async pasteFromEntry(entry: ClipboardEntry) {
     const nodes = entry.payload as MindMapNode[];
+    console.log(
+      "[clipdbg] pasteFromEntry kind=", entry.kind,
+      "isArray=", Array.isArray(nodes), "count=", nodes?.length,
+      "anchor=", this.deps.activation.active?.text ?? null,
+    );
     if (!Array.isArray(nodes) || !nodes.length || !this.deps.model.root) return;
     const anchor = this.deps.activation.active;
     if (!anchor) return;
@@ -250,12 +265,22 @@ export class NodeOperations {
     this.deps.emitChange("add");
   }
 
-  // 粘贴外部纯文本：在激活节点下新建子节点承载文本（对齐 Figma/Miro 的跨应用
-  // 粘贴行为）。复用 createRelated 的 add 命令模式：样式按级数解析、追加到子级末尾、
-  // 走 history 可逆命令，随后激活新节点并重布局。无激活节点或空文本时忽略
+  // 粘贴外部文本：含换行或 Tab 的结构化文本按缩进解析为节点树走节点粘贴路径
+  // （对齐飞书大纲式粘贴）；纯文字在激活节点下新建子节点承载（对齐 Figma/Miro
+  // 的跨应用粘贴行为）。复用 createRelated 的 add 命令模式：样式按级数解析、
+  // 追加到子级末尾、走 history 可逆命令，随后激活新节点并重布局。
+  // 无激活节点或空文本时忽略
   async pasteText(text: string) {
     const parent = this.deps.activation.active;
     if (!parent || !text) return;
+    // 结构化文本（含换行或 Tab）：解析为节点树后复用节点粘贴（含层级、历史、激活）
+    if (/[\n\t]/.test(text)) {
+      const tree = parseTextTree(text);
+      if (tree.length) {
+        await this.pasteFromEntry({ kind: "mindmap", payload: tree, text });
+        return;
+      }
+    }
     // 目标父级处于折叠态时先展开，避免新建节点被可见性联动隐藏
     if (parent.collapsed) {
       parent.collapsed = false;
@@ -298,4 +323,41 @@ export class NodeOperations {
     this.deps.activation.activate(node);
     this.deps.emitChange("add");
   }
+}
+
+// 结构化文本解析为节点树（编辑态/激活态粘贴多行缩进文本）：按行拆分，行首
+// Tab 与 4 空格组计缩进深度，以最小缩进为顶层，栈式构建父子层级；
+// 空行跳过，每行文本 trim 后作为节点文本
+function parseTextTree(text: string): MindMapNode[] {
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((l) => l.trim().length);
+  if (!lines.length) return [];
+  const depthOf = (line: string): number => {
+    let tabs = 0;
+    let spaces = 0;
+    for (const ch of line) {
+      if (ch === "\t") {
+        tabs++;
+        spaces = 0;
+      } else if (ch === " ") {
+        spaces++;
+      } else break;
+    }
+    return tabs + Math.floor(spaces / 4);
+  };
+  const min = Math.min(...lines.map(depthOf));
+  const roots: MindMapNode[] = [];
+  const stack: { depth: number; node: MindMapNode }[] = [];
+  for (const line of lines) {
+    const depth = Math.max(0, depthOf(line) - min);
+    const node: MindMapNode = { text: line.trim(), children: [] };
+    while (stack.length && stack[stack.length - 1]!.depth >= depth) stack.pop();
+    const top = stack[stack.length - 1];
+    if (top) top.node.children.push(node);
+    else roots.push(node);
+    stack.push({ depth, node });
+  }
+  return roots;
 }
