@@ -337,8 +337,17 @@ function clearAiChat() {
 }
 
 // ---- 文档管理状态（IndexedDB 持久化 + 自动保存）----
-// 已保存文档列表（按更新时间倒序，仅用于左上角文档菜单）
+// 已保存文档列表（仅用于左上角文档 dialog）
 const docs = ref<MindMapDoc[]>([]);
+// 文档 dialog 与排序状态：按创建/更新时间 + 升降序
+const docsOpen = ref(false);
+const sortKey = ref<"createdAt" | "updatedAt">("updatedAt");
+const sortAsc = ref(false);
+const sortedDocs = computed(() => {
+  const arr = [...docs.value];
+  arr.sort((a, b) => (sortAsc.value ? 1 : -1) * (a[sortKey.value] - b[sortKey.value]));
+  return arr;
+});
 // 当前打开的文档 id 与名称；空 id 表示尚未打开（首帧）
 const currentId = ref("");
 const docName = ref("");
@@ -387,6 +396,8 @@ let mindmap: MindMap | null = null;
 function syncToolbar() {
   canUndo.value = mindmap?.canUndo ?? false;
   canRedo.value = mindmap?.canRedo ?? false;
+  // 文档名跟随根节点文本：任何变化（编辑/撤销/重做/AI 编辑）都会经此同步
+  if (mindmap) docName.value = mindmap.toJSON().text;
 }
 
 function pickLayout(value: LayoutDirection) {
@@ -487,20 +498,22 @@ async function exportImageHd() {
 
 // ---- 文档管理（IndexedDB 持久化 + 自动保存）----
 
-// 拉取文档列表（按更新时间倒序）
+// 拉取文档列表（dialog 内展示，排序由 sortedDocs 决定）
 function refreshDocs() {
   return listDocs().then((all) => {
-    docs.value = all.sort((a, b) => b.updatedAt - a.updatedAt);
+    docs.value = all;
   });
 }
 
-// 把当前场景数据落盘到当前文档（布局方向与连线样式随档保存）
+// 把当前场景数据落盘到当前文档（文档名取根节点文本，布局方向与连线样式随档保存）
 function saveCurrent() {
   if (!mindmap || !currentId.value) return;
+  const data = mindmap.toJSON();
+  docName.value = data.text;
   void putDoc({
     id: currentId.value,
     name: docName.value,
-    data: mindmap.toJSON(),
+    data,
     direction: layout.value,
     edgeStyle: edge.value,
     createdAt: docCreatedAt,
@@ -550,18 +563,22 @@ function mountScene(
     },
   });
   syncToolbar();
+  // 新建/切换导图默认激活根节点（selectRoot 内部等待异步初始化完成）
+  void mindmap.selectRoot();
   // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
   (window as any).__mindmap = mindmap;
 }
 
 // 新建导图：先落盘当前文档，再以新 id 建档并重建场景；initial 为首档示例数据
 function createNew(initial?: MindMapNode) {
+  docsOpen.value = false;
   flushSave();
   const now = Date.now();
+  const docData = initial ?? { text: "中心主题", children: [] };
   const doc: MindMapDoc = {
     id: crypto.randomUUID(),
-    name: "未命名导图",
-    data: initial ?? { text: "中心主题", children: [] },
+    name: docData.text,
+    data: docData,
     direction: layout.value,
     edgeStyle: edge.value,
     createdAt: now,
@@ -577,7 +594,11 @@ function createNew(initial?: MindMapNode) {
 
 // 打开指定文档：先落盘当前文档，再按档内偏好（方向/连线）还原场景
 async function openDoc(id: string) {
-  if (id === currentId.value) return;
+  if (id === currentId.value) {
+    docsOpen.value = false;
+    return;
+  }
+  docsOpen.value = false;
   flushSave();
   const doc = await getDoc(id);
   if (!doc) return;
@@ -634,7 +655,10 @@ onMounted(async () => {
 
   // 打开最近编辑的文档；本地无历史文档时以示例数据新建首档
   await refreshDocs();
-  const latest = docs.value[0];
+  const latest = docs.value.reduce<(typeof docs.value)[number] | null>(
+    (acc, d) => (!acc || d.updatedAt > acc.updatedAt ? d : acc),
+    null,
+  );
   if (latest) {
     currentId.value = latest.id;
     docName.value = latest.name;
@@ -659,47 +683,85 @@ onUnmounted(() => {
 <template>
   <canvas ref="canvasRef" class="block h-screen w-screen bg-white"></canvas>
 
-  <!-- 文档切换器：新建导图 / 打开历史导图（IndexedDB 自动保存） -->
+  <!-- 文档切换器：点击弹出 dialog（新建导图 / 排序 / 打开历史导图 / 删除） -->
   <div class="fixed top-4 left-4 z-10">
-    <div class="group relative">
-      <button
-        class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
-        title="导图列表"
-      >
-        <File class="h-4 w-4 shrink-0 text-gray-500" />
-        <span class="max-w-40 truncate text-xs text-gray-800">
-          {{ docName || "加载中…" }}
-        </span>
-        <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
-      </button>
+    <button
+      class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+      title="导图列表"
+      @click="docsOpen = true"
+    >
+      <File class="h-4 w-4 shrink-0 text-gray-500" />
+      <span class="max-w-40 truncate text-xs text-gray-800">
+        {{ docName || "加载中…" }}
+      </span>
+      <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
+    </button>
+  </div>
+
+  <!-- 文档 dialog：遮罩点击关闭，列表按创建/更新时间排序，点击条目打开导图 -->
+  <Teleport to="body">
+    <div
+      v-if="docsOpen"
+      class="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4"
+      @click.self="docsOpen = false"
+    >
       <div
-        class="absolute top-[calc(100%+10px)] left-0 z-20 hidden w-56 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+        class="flex max-h-[70vh] w-80 flex-col rounded-xl bg-white p-4 shadow-[0_8px_32px_rgba(0,0,0,0.2)]"
+        role="dialog"
+        aria-label="导图列表"
       >
-        <button
-          class="flex w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
-          @click="createNew()"
-        >
-          <Plus class="h-3.5 w-3.5 shrink-0" />
-          新建导图
-        </button>
-        <div class="mx-2 my-1 border-t border-gray-100"></div>
-        <div class="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+        <div class="mb-3 flex items-center gap-2">
+          <span class="flex-1 text-sm font-medium text-gray-800">我的导图</span>
+          <button
+            class="flex h-7 cursor-pointer items-center gap-1 rounded-lg bg-gray-900 px-2.5 text-xs text-white hover:bg-gray-700"
+            @click="createNew()"
+          >
+            <Plus class="h-3.5 w-3.5 shrink-0" />
+            新建导图
+          </button>
+        </div>
+
+        <!-- 排序：创建时间 / 更新时间，点击切换升降序 -->
+        <div class="mb-2 flex items-center gap-2">
+          <button
+            v-for="key in (['createdAt', 'updatedAt'] as const)"
+            :key="key"
+            class="flex h-6 cursor-pointer items-center gap-0.5 rounded-md px-2 text-[11px]"
+            :class="
+              sortKey === key
+                ? 'bg-[#e5edff] font-medium text-blue-700'
+                : 'text-gray-500 hover:bg-gray-100'
+            "
+            @click="sortKey === key ? (sortAsc = !sortAsc) : (sortKey = key)"
+          >
+            {{ key === "createdAt" ? "创建时间" : "更新时间" }}
+            <span v-if="sortKey === key" class="text-[9px]">{{
+              sortAsc ? "↑" : "↓"
+            }}</span>
+          </button>
+        </div>
+
+        <!-- 导图列表 -->
+        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           <div
-            v-for="d in docs"
+            v-for="d in sortedDocs"
             :key="d.id"
-            class="group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 hover:bg-gray-100"
-            :class="{ 'bg-[#e5edff] text-blue-700': d.id === currentId }"
+            class="group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
+            :class="{ 'bg-[#e5edff]': d.id === currentId }"
             @click="openDoc(d.id)"
           >
-            <File class="h-3.5 w-3.5 shrink-0 text-gray-400" />
-            <div class="min-w-0 flex-1 text-left">
+            <File class="h-4 w-4 shrink-0 text-gray-400" />
+            <div class="min-w-0 flex-1">
               <div
                 class="truncate text-xs"
-                :class="{ 'text-blue-700': d.id === currentId }"
+                :class="
+                  d.id === currentId ? 'font-medium text-blue-700' : 'text-gray-800'
+                "
               >
                 {{ d.name }}
               </div>
               <div class="text-[10px] text-gray-400">
+                创建于 {{ formatTime(d.createdAt) }} · 更新于
                 {{ formatTime(d.updatedAt) }}
               </div>
             </div>
@@ -711,10 +773,16 @@ onUnmounted(() => {
               <Trash class="h-3.5 w-3.5" />
             </button>
           </div>
+          <div
+            v-if="!sortedDocs.length"
+            class="py-8 text-center text-xs text-gray-400"
+          >
+            还没有导图，点击上方「新建导图」开始
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 
   <!-- 单一胶囊工具条：撤销/重做可点击，其余项悬浮展开选项面板 -->
   <div

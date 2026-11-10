@@ -81,6 +81,9 @@ export class MindMap {
   private cleanups: Array<() => void> = [];
   // 已拆卸标志：destroy 后 init 不再挂载节点（init 为异步，可能与 destroy 竞争）
   private destroyed = false;
+  // 异步初始化 promise：构造函数无法 await，宿主可在 ready 落定后安全操作场景
+  // （如 selectRoot 选中根节点）
+  private ready: Promise<void>;
 
   constructor(options: MindMapOptions) {
     this.direction = options.direction ?? "left";
@@ -271,8 +274,9 @@ export class MindMap {
     this.app.use(aiPlugin);
     // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
-    // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）
-    void this.init(options.data);
+    // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）；
+    // promise 留档供 selectRoot 等宿主调用等待就绪
+    this.ready = this.init(options.data);
   }
 
   // 全选：全部可见节点进入多选态（高亮环 + 批量拖拽/删除/复制可用）。
@@ -285,6 +289,14 @@ export class MindMap {
     const visible = all.filter((n) => n.visible);
     if (!visible.length) return;
     this.activation.setSelection(visible);
+  }
+
+  // 选中根节点：等待异步初始化完成后进入单选激活态（高亮环 + 方向键导航可用），
+  // 供宿主在新建/切换导图后默认聚焦根节点；已拆卸或初始化失败时静默跳过
+  async selectRoot(): Promise<void> {
+    await this.ready;
+    if (this.destroyed || !this.model.root) return;
+    this.activation.setSelection([this.model.root]);
   }
 
   // 撤销：真正输入中（编辑态）或拖拽中不响应（避免与进行中的变更互踩）；激活态覆盖层
