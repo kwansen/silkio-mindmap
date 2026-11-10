@@ -178,10 +178,13 @@ export class NodeOperations {
       return true;
     });
     console.log("[clipdbg] copySelection roots=", roots.map((n) => n.text));
+    const payload = roots.map((n) => this.deps.model.serializeNode(n));
     return {
       kind: "mindmap",
-      payload: roots.map((n) => this.deps.model.serializeNode(n)),
-      text: roots.map((n) => n.text).join("\n"),
+      payload,
+      // text 通道输出层级大纲文本：顶层无缩进，子孙按深度叠加 Tab——粘贴到飞书等
+      // 大纲类应用即还原树形层级（与 parseTextTree 解析规则互逆）
+      text: toOutlineText(payload).join("\n"),
     };
   }
 
@@ -323,6 +326,22 @@ export class NodeOperations {
     this.deps.activation.activate(node);
     this.deps.emitChange("add");
   }
+}
+
+// 层级大纲文本：节点树扁平化为行数组，深度 d 的节点行首叠加 d×4 空格——与飞书
+// CF_TEXT 的缩进约定一致（其复制即 4 空格/层），双向互操作；与 parseTextTree
+// （Tab 与 4 空格组均计一层深度）互逆，供 text/plain 剪贴板通道使用。
+// 顶层兄弟子树之间插入空行——飞书的纯文本解析器按空行切块生成顶层节点（其自身
+// 复制即此格式，无空行时整段会被聚合为单节点）；空行在 parseTextTree 中被过滤，
+// 往返解析不受影响
+function toOutlineText(nodes: MindMapNode[], depth = 0): string[] {
+  return nodes.flatMap((n, i) => {
+    const block = [
+      "    ".repeat(depth) + n.text,
+      ...toOutlineText(n.children ?? [], depth + 1),
+    ];
+    return depth <= 1 && i > 0 ? ["", ...block] : block;
+  });
 }
 
 // 结构化文本解析为节点树（编辑态/激活态粘贴多行缩进文本）：按行拆分，行首
