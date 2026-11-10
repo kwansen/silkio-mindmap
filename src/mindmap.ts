@@ -99,12 +99,16 @@ export class MindMap {
     this.commands.register({
       id: "mindmap.undo",
       title: "撤销",
-      run: () => this.undo(),
+      run: async () => {
+        await this.undo();
+      },
     });
     this.commands.register({
       id: "mindmap.redo",
       title: "重做",
-      run: () => this.redo(),
+      run: async () => {
+        await this.redo();
+      },
     });
     this.commands.register({
       id: "mindmap.copy",
@@ -250,6 +254,10 @@ export class MindMap {
         app: this.app,
         model: this.model,
         history: this.history,
+        // AI 的 undo/redo 操作与手动 Ctrl+Z 完全同源（含编辑态/拖拽守卫、
+        // 清选中、重布局与宿主通知），返回是否实际执行供步骤反馈区分跳过
+        undo: () => this.undo(),
+        redo: () => this.redo(),
         editor: this.editor,
         sel: this.sel,
         activation: this.activation,
@@ -281,25 +289,29 @@ export class MindMap {
 
   // 撤销：真正输入中（编辑态）或拖拽中不响应（避免与进行中的变更互踩）；激活态覆盖层
   // （隐藏态视觉，文字仍由 canvas 渲染）不算编辑，撤销照常执行；回退前先清空选中态，
-  // 防止悬空引用（选中/覆盖层指向已摘除的节点）
-  async undo() {
-    if (this.activation.editing || this.drag.dragState) return;
+  // 防止悬空引用（选中/覆盖层指向已摘除的节点）。
+  // 返回是否实际撤销了一条命令（无可撤销或被守卫拦截返回 false），AI 控制器据此
+  // 区分"已撤销"与"没有可撤销"的步骤反馈
+  async undo(): Promise<boolean> {
+    if (this.activation.editing || this.drag.dragState) return false;
     const cmd = this.history.undo();
-    if (!cmd) return;
+    if (!cmd) return false;
     this.activation.deactivate();
     await this.relayout();
     // 直接调用字段而非 emitChange：undo/redo 不产生新变更，仅通知宿主数据已回退
     this.onChange?.(cmd.type as MindMapChangeType);
+    return true;
   }
 
   // 重做：流程与 undo 对称，方向相反
-  async redo() {
-    if (this.activation.editing || this.drag.dragState) return;
+  async redo(): Promise<boolean> {
+    if (this.activation.editing || this.drag.dragState) return false;
     const cmd = this.history.redo();
-    if (!cmd) return;
+    if (!cmd) return false;
     this.activation.deactivate();
     await this.relayout();
     this.onChange?.(cmd.type as MindMapChangeType);
+    return true;
   }
 
   get canUndo(): boolean {

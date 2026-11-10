@@ -882,7 +882,8 @@ onUnmounted(() => {
     <!-- 消息流 -->
     <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
       <div v-if="!aiMessages.length && !aiPending" class="mt-10 text-center text-xs leading-5 text-gray-400">
-        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 / 这个导图讲了什么<br />同名节点用路径定位，如 "线性代数/矩阵"
+        输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 / 这个导图讲了什么<br />
+        撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如 "线性代数/矩阵"
       </div>
 
       <div v-for="m in aiMessages" :key="m.id">

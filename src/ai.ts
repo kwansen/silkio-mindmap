@@ -1,5 +1,11 @@
 import { capabilityKey, compose } from "@silker/core";
-import type { App, HistoryCommand, Plugin, Text } from "@silker/core";
+import type {
+  App,
+  HistoryCommand,
+  Plugin,
+  SerializedCommand,
+  Text,
+} from "@silker/core";
 import type {
   HistoryCapability,
   TextEditorCapability,
@@ -67,13 +73,33 @@ export interface AIMindMapAnswerOp {
   text: string;
 }
 
+// 撤销最近一次变更：直接驱动既有历史链（与手动 Ctrl+Z 完全同源），
+// 不进入本次 run 的组合命令；可连用多次，不能与编辑类操作混用
+export interface AIMindMapUndoOp {
+  op: "undo";
+}
+
+// 重做最近一次被撤销的变更：语义与 undo 对称
+export interface AIMindMapRedoOp {
+  op: "redo";
+}
+
+// 读取历史：返回当前撤销/重做栈中各条变更的可读描述（只读，不修改导图）。
+// 用户问"刚才改了什么/做过哪些操作"时使用，描述并入本次 run 的 answer
+export interface AIMindMapHistoryOp {
+  op: "history";
+}
+
 export type AIMindMapOp =
   | AIMindMapAddOp
   | AIMindMapEditOp
   | AIMindMapMoveOp
   | AIMindMapDeleteOp
   | AIMindMapRenderOp
-  | AIMindMapAnswerOp;
+  | AIMindMapAnswerOp
+  | AIMindMapUndoOp
+  | AIMindMapRedoOp
+  | AIMindMapHistoryOp;
 
 // 生成适配器的输入：用户指令 + 当前树快照（带 id）+ 锚点/选中上下文。
 // tree 经 model.toJSON() 导出，节点 id 与运行时同源；anchorPath 为锚点节点的
@@ -109,7 +135,8 @@ export interface AIEditRunOptions {
 }
 
 export interface AIEditResult {
-  // 实际编译并执行的命令条数（被规整掉的无操作不计）
+  // 实际生效的变更条数：编辑类 run 为编译执行的命令数，undo/redo run 为成功
+  // 驱动历史链的次数（被跳过的无操作不计）
   applied: number;
   ops: AIMindMapOp[];
   // 逐步执行反馈链：每条操作做了什么、落到哪个节点、是否被跳过（如改名前后相同）
@@ -137,7 +164,11 @@ export const AI_EDITING_CAPABILITY =
 export interface AIEditingDeps {
   app: App;
   model: MindTree;
-  history: Pick<HistoryCapability, "exec">;
+  history: Pick<HistoryCapability, "exec" | "exportJSON">;
+  // 撤销/重做入口（门面接线，与手动 Ctrl+Z 完全同源：含编辑态/拖拽守卫、
+  // 清空选中态、重布局与宿主通知）：返回是否实际执行了一条命令
+  undo: () => Promise<boolean>;
+  redo: () => Promise<boolean>;
   editor: Pick<TextEditorCapability, "bind">;
   sel: Pick<SelectionCapability<Text>, "items">;
   activation: Pick<
@@ -257,10 +288,11 @@ export function normalizeAIOps(raw: AIMindMapOp[] | string): AIMindMapOp[] {
     if (op.op === "add") {
       if (!Array.isArray(op.nodes) || !op.nodes.length)
         throw new Error(`AI add 操作的 nodes 不能为空${no}`);
-      op.nodes.forEach((n, j) => {
-        if (typeof (n as MindMapNode)?.text !== "string")
-          throw new Error(`AI add 操作的 nodes[${j}] 缺少 text${no}`);
-      });
+      // 逐节点规整：校验 text、children 缺省补空数组（LLM 常省略叶子的 children，
+      // 直接透传会在 adoptIds 的 children.map 处崩溃）
+      op.nodes = op.nodes.map((n, j) =>
+        normalizeRenderTree(n, `${no} nodes[${j}]`),
+      );
       if (op.index !== undefined && typeof op.index !== "number")
         throw new Error(`AI add 操作的 index 应为数字${no}`);
     } else if (op.op === "edit") {
@@ -281,6 +313,8 @@ export function normalizeAIOps(raw: AIMindMapOp[] | string): AIMindMapOp[] {
     } else if (op.op === "answer") {
       if (typeof op.text !== "string" || !op.text)
         throw new Error(`AI answer 操作缺少 text${no}`);
+    } else if (op.op === "undo" || op.op === "redo" || op.op === "history") {
+      // 无载荷操作：undo/redo 驱动既有历史链，history 只读历史记录，无需校验字段
     } else if (op.op !== "delete") {
       throw new Error(`AI 返回了未知操作类型${no}: ${String(op?.op)}`);
     }
@@ -331,6 +365,90 @@ export function parseAIResponse(
   throw new Error("AI 返回格式错误：应为操作数组或回答文本");
 }
 
+// ---- 历史描述（history 操作的读取实现，纯函数，导出便于测试）----
+
+// 各 kind 命令的载荷形状（与 history-codec.ts 的对应接口一致，仅取描述所需字段）
+interface HistoryPastePayload {
+  inserts: Array<{ parentId: string; node: MindMapNode }>;
+}
+interface HistoryDeletePayload {
+  captures: Array<{ node: MindMapNode }>;
+}
+interface HistoryMovePayload {
+  moves: Array<{
+    nodeId: string;
+    oldParentId: string;
+    newParentId: string;
+  }>;
+}
+interface HistoryTextPayload {
+  before: string;
+  after: string;
+}
+
+// 把单条序列化命令转为可读描述："将「前端」改为「前端开发」"。
+// 节点文本按 id 经模型解析（已删/已换树节点的文本从载荷内嵌数据读取）；
+// 组合命令递归描述子命令并以分号连接；未知 kind 退化为 kind 字符串
+export function describeHistoryCommand(
+  s: SerializedCommand,
+  model: Pick<MindTree, "nodeById">,
+): string {
+  const nodeText = (id: string): string =>
+    model.nodeById(id)?.text ?? "（已不存在的节点）";
+  if (s.kind === "composite") {
+    const p = s.payload as { children?: SerializedCommand[] } | null;
+    const children = (p?.children ?? [])
+      .map((c) => describeHistoryCommand(c, model))
+      .filter(Boolean);
+    return children.join("；") || s.kind;
+  }
+  switch (s.kind) {
+    case "mindmap.text": {
+      const p = s.payload as HistoryTextPayload;
+      return `将「${p.before}」改为「${p.after}」`;
+    }
+    case "mindmap.add": {
+      const p = s.payload as { parentId: string; node: MindMapNode };
+      return `在「${nodeText(p.parentId)}」下添加「${p.node.text}」`;
+    }
+    case "mindmap.paste": {
+      const p = s.payload as HistoryPastePayload;
+      const first = p.inserts[0];
+      if (!first) return "粘贴节点";
+      const more =
+        p.inserts.length > 1 ? ` 等 ${p.inserts.length} 个节点` : "";
+      return `在「${nodeText(first.parentId)}」下粘贴「${first.node.text}」${more}`;
+    }
+    case "mindmap.delete": {
+      const p = s.payload as HistoryDeletePayload;
+      const first = p.captures[0];
+      if (!first) return "删除节点";
+      const more = p.captures.length > 1 ? ` 等 ${p.captures.length} 处` : "";
+      return `删除「${first.node.text}」${more}`;
+    }
+    case "mindmap.move": {
+      const p = s.payload as HistoryMovePayload;
+      const m = p.moves[0];
+      if (!m) return "移动节点";
+      if (m.oldParentId === m.newParentId)
+        return `调整「${nodeText(m.nodeId)}」的排序`;
+      return `将「${nodeText(m.nodeId)}」移动到「${nodeText(m.newParentId)}」下`;
+    }
+    case "mindmap.layout": {
+      const p = s.payload as { after: string };
+      return `调整布局方向为「${p.after}」`;
+    }
+    case "mindmap.edge": {
+      const p = s.payload as { after: string };
+      return `调整连线样式为「${p.after}」`;
+    }
+    case "mindmap.render":
+      return "AI 重渲染整棵导图";
+    default:
+      return s.kind;
+  }
+}
+
 // 给宿主的缺省提示词模板：把请求渲染为大模型可直接使用的指令（含操作 schema 与
 // 树数据）。接真实 LLM 时把它作为消息发出，返回的 JSON 交给控制器 run 解析即可
 export function defaultAIEditPrompt(req: AIEditRequest): string {
@@ -344,6 +462,9 @@ export function defaultAIEditPrompt(req: AIEditRequest): string {
     '- {"op":"move","target":"<可选>","parent":"<新父节点,缺省根节点>","index":<可选位次>} 移动节点子树（换父或同父排序）',
     '- {"op":"delete","target":"<可选>"} 删除节点及其子树（谨慎使用）',
     '- {"op":"render","tree":{"text":"...","children":[...]}} 用完整新导图数据整体替换当前导图（重排/重构/重新生成类指令用；小改动请用上述增量操作）。render 之后的操作引用新树中的节点（新树节点可沿用原 id，也可省略 id）',
+    '- {"op":"undo"} 撤销最近一次变更（可多条连用，不能与编辑类操作混用）；用户要求撤销/撤回/反悔时使用',
+    '- {"op":"redo"} 重做最近一次被撤销的变更（限制同 undo）；用户要求恢复被撤销的修改时使用',
+    '- {"op":"history"} 读取当前撤销/重做历史记录（只读，各条变更的描述会并入回答返回）；用户询问"刚才改了什么/做过哪些操作"时使用',
     "target 定位规则（按优先级）：节点 id（最稳；下方导图数据中每个节点都带 id，多条操作引用同一节点时必须用 id，不要用文本）；路径 \"A/B/C\"（次选）；\"文本[n]\"（第 n 个同名节点，n 从 1 起）；纯文本（仅全局唯一时可用）。",
     "",
     "执行前先审视结构合理性：若指令会造成明显不当的层级（如把一级主题挂到末级知识点下），先在 answer 里说明问题并给出建议，未经用户确认不要机械执行大范围结构变更。",
@@ -425,12 +546,67 @@ export class AIEditingController {
     }
     const { ops, answer } = parseAIResponse(raw);
 
+    // undo/redo 直接驱动既有历史链（与手动 Ctrl+Z 同源），不进入本次 run 的组合
+    // 命令：与编辑类操作混用即整体拒绝（避免"先撤销再在同一批里改新树"的时序歧义）；
+    // history 只读，可与任意操作共存
+    if (
+      ops.some((o) => o.op === "undo" || o.op === "redo") &&
+      ops.some(
+        (o) =>
+          o.op === "add" ||
+          o.op === "edit" ||
+          o.op === "move" ||
+          o.op === "delete" ||
+          o.op === "render",
+      )
+    )
+      throw new Error("AI 的 undo/redo 操作不能与编辑类操作混用，请分开执行");
+
+    // 纯控制链（undo/redo/history，无编辑类操作）：逐条驱动既有历史链，
+    // 每条 undo/redo 经门面完成清选中/重布局/宿主通知；无命令入栈，本次
+    // run 不产生新变更（可连用多次）
+    if (ops.some((o) => o.op === "undo" || o.op === "redo")) {
+      const steps: AIEditStep[] = [];
+      const answers = answer ? [answer] : [];
+      let applied = 0;
+      for (const op of ops) {
+        if (op.op === "undo") {
+          const ok = await this.deps.undo();
+          if (ok) applied++;
+          steps.push({
+            op,
+            label: ok ? "撤销最近一次变更" : "没有可撤销的变更，已跳过",
+            status: ok ? "applied" : "skipped",
+          });
+        } else if (op.op === "redo") {
+          const ok = await this.deps.redo();
+          if (ok) applied++;
+          steps.push({
+            op,
+            label: ok ? "重做最近一次被撤销的变更" : "没有可重做的变更，已跳过",
+            status: ok ? "applied" : "skipped",
+          });
+        } else if (op.op === "history") {
+          answers.push(this.readHistoryReport());
+          steps.push({ op, label: "读取历史记录", status: "applied" });
+        }
+      }
+      return {
+        applied,
+        ops,
+        steps,
+        answer: answers.filter(Boolean).join("\n\n") || undefined,
+      };
+    }
+
     // 编译全部命令成功才应用（exec 前抛错 = 本次 run 无任何副作用）
-    const { commands, created, steps, focus, activate } = this.compile(
-      ops,
-      anchorId,
-    );
-    if (!commands.length) return { applied: 0, ops, steps, answer };
+    const { commands, created, steps, focus, activate, historyText } =
+      this.compile(ops, anchorId);
+    // history 操作的历史描述并入 AI 回答（与 answer 可共存）
+    const mergedAnswer =
+      [answer, historyText].filter(Boolean).join("\n\n") || undefined;
+    if (!commands.length)
+      return { applied: 0, ops, steps, answer: mergedAnswer };
     // 清空选中态：AI 可能删除选中节点，先摘除悬空的覆盖层引用
     this.deps.activation.deactivate();
     this.deps.history.exec(compose("ai", ...commands));
@@ -444,7 +620,7 @@ export class AIEditingController {
     // 画布居中到最后落点（新建/移动）：AI 变更常发生在视口外，不聚焦会"看不到效果"
     if (focus) this.deps.app.camera.centerOn(focus.x + focus.width / 2, focus.y + focus.height / 2);
     this.deps.emitChange("ai");
-    return { applied: commands.length, ops, steps, answer };
+    return { applied: commands.length, ops, steps, answer: mergedAnswer };
   }
 
   // 把操作序列编译为历史命令：编译期不改动树结构（树变更只发生在 redo 里），
@@ -462,6 +638,8 @@ export class AIEditingController {
     focus: Text | null;
     // 指定激活节点（render 整树替换激活新根）；缺省沿用"最后新建节点"规则
     activate: Text | null;
+    // history 操作读取的历史描述（无 history 操作时为 null），并入 run 的 answer
+    historyText: string | null;
   } {
     const { model, app } = this.deps;
     const root = model.root!;
@@ -480,6 +658,8 @@ export class AIEditingController {
     let focus: Text | null = null;
     // 指定激活节点（render 整树替换激活新根）；null 时沿用"最后新建节点"规则
     let activate: Text | null = null;
+    // history 操作读取的历史描述：run 并入 answer
+    let historyText: string | null = null;
     const targetOf = (node: Text): AIEditStep["target"] => ({
       id: node.id!,
       text: node.text,
@@ -556,7 +736,8 @@ export class AIEditingController {
     const adoptIds = (data: MindMapNode): MindMapNode => ({
       ...data,
       id: data.id && !exists(data.id) ? data.id : undefined,
-      children: data.children.map((c) => adoptIds(c)),
+      // 防御：children 已在 normalizeAIOps 规整，此处兜底三方直接调用 run 的场景
+      children: (data.children ?? []).map((c) => adoptIds(c)),
     });
     const registerSubtree = (node: Text) => {
       session.set(node.id!, node);
@@ -567,6 +748,15 @@ export class AIEditingController {
       const no = `（第 ${i + 1} 项）`;
       // 回答类操作已在 parseAIResponse 提取为 answer，防御性跳过
       if (op.op === "answer") continue;
+      // undo/redo 已在 run 分流为纯控制链（驱动既有历史链、不入本次组合命令），
+      // 防御性跳过避免误编译为 delete
+      if (op.op === "undo" || op.op === "redo") continue;
+      // history：只读历史记录，不产生命令——描述并入 run 的 answer
+      if (op.op === "history") {
+        historyText = this.readHistoryReport();
+        steps.push({ op, label: "读取历史记录", status: "applied" });
+        continue;
+      }
       if (op.op === "add") {
         const parent = ensureTarget(op.target, no);
         // 目标折叠时先展开（同 createRelated/paste 纪律：展开不入命令），避免新建子树被可见性联动隐藏
@@ -943,7 +1133,30 @@ export class AIEditingController {
       deleted.set(node.id!, no);
     }
 
-    return { commands, created, steps, focus, activate };
+    return { commands, created, steps, focus, activate, historyText };
+  }
+
+  // 读取历史：把撤销/重做双栈的序列化命令转为可读描述（history 操作的返回内容）。
+  // 撤销栈按"最近在前"排列，重做栈按重放次序排列；历史栈不可序列化（含三方
+  // 闭包命令）时提示不可读
+  private readHistoryReport(): string {
+    const snap = this.deps.history.exportJSON?.();
+    if (!snap) return "历史记录暂不可读（包含无法序列化的命令）";
+    const describe = (list: readonly SerializedCommand[]) =>
+      list
+        .map((s, i) => `${i + 1}. ${describeHistoryCommand(s, this.deps.model)}`)
+        .join("\n");
+    // 导出按栈底→栈顶排列：撤销栈反转后最近变更在前，重做栈保持重放次序
+    const undoDesc = describe([...snap.undo].reverse());
+    const redoDesc = describe(snap.redo);
+    return [
+      undoDesc
+        ? `可撤销 ${snap.undo.length} 条（最近在前）：\n${undoDesc}`
+        : "没有可撤销的变更",
+      redoDesc
+        ? `可重做 ${snap.redo.length} 条（按重放次序）：\n${redoDesc}`
+        : "没有可重做的变更",
+    ].join("\n");
   }
 }
 
