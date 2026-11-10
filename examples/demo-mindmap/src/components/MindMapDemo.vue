@@ -422,6 +422,23 @@ function syncToolbar() {
   if (mindmap) docName.value = mindmap.toJSON().text;
 }
 
+// ---- 工具条悬浮面板：悬浮 200ms 延迟展开（hover intent），移出立即收起 ----
+// 纯 CSS group-hover 过于灵敏，鼠标划过工具条即弹面板易误触；改为定时器延迟
+type ToolbarMenu = "layout" | "edge" | "export" | "zoom";
+const openMenu = ref<ToolbarMenu | null>(null);
+let menuTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleMenu(menu: ToolbarMenu) {
+  if (menuTimer) clearTimeout(menuTimer);
+  menuTimer = setTimeout(() => (openMenu.value = menu), 200);
+}
+function closeMenu() {
+  if (menuTimer) {
+    clearTimeout(menuTimer);
+    menuTimer = null;
+  }
+  openMenu.value = null;
+}
+
 function pickLayout(value: LayoutDirection) {
   if (!mindmap) return;
   layout.value = value;
@@ -466,11 +483,11 @@ function onZoomInput(event: Event) {
   app.requestCameraRender();
 }
 
-// 滑块轨道填充：滑块左侧为深色已填充段，右侧为浅色剩余段
+// 滑块轨道填充：滑块左侧为紫色已填充段（与 AI 侧边栏同色），右侧为浅色剩余段
 const zoomTrackStyle = computed(() => {
   const pct = ((zoom.value - 20) / (800 - 20)) * 100;
   return {
-    background: `linear-gradient(to right, #111827 ${pct}%, #e5e7eb ${pct}%)`,
+    background: `linear-gradient(to right, #8b5cf6 ${pct}%, #e5e7eb ${pct}%)`,
   };
 });
 
@@ -715,6 +732,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener("beforeunload", flushSave);
+  closeMenu();
   flushSave();
   mindmap?.destroy();
   mindmap = null;
@@ -777,7 +795,11 @@ onUnmounted(() => {
         </button>
 
         <!-- 布局方向设置：横向（right）/ 左向（left）/ 双向平衡（both）/ 组织结构图（down） -->
-        <div class="group relative">
+        <div
+          class="relative"
+          @mouseenter="scheduleMenu('layout')"
+          @mouseleave="closeMenu"
+        >
           <button
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="布局方向"
@@ -788,13 +810,14 @@ onUnmounted(() => {
             />
           </button>
           <div
-            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+            class="absolute top-[calc(100%+10px)] right-0 z-20 flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
+            :class="openMenu === 'layout' ? 'flex' : 'hidden'"
           >
             <button
               v-for="opt in layoutOptions"
               :key="opt.value"
               class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
-              :class="{ 'bg-[#e5edff] text-blue-700': layout === opt.value }"
+              :class="{ 'bg-[#ede9fe] text-violet-700': layout === opt.value }"
               :title="opt.title"
               @click="pickLayout(opt.value)"
             >
@@ -807,7 +830,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 连线形状设置 -->
-        <div class="group relative">
+        <div
+          class="relative"
+          @mouseenter="scheduleMenu('edge')"
+          @mouseleave="closeMenu"
+        >
           <button
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="连线形状"
@@ -815,13 +842,14 @@ onUnmounted(() => {
             <component :is="edgeIcons[edge]" class="block h-4 w-4 shrink-0" />
           </button>
           <div
-            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+            class="absolute top-[calc(100%+10px)] right-0 z-20 flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
+            :class="openMenu === 'edge' ? 'flex' : 'hidden'"
           >
             <button
               v-for="opt in edgeOptions"
               :key="opt.value"
               class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-md text-sm text-gray-500 hover:bg-gray-100"
-              :class="{ 'bg-[#e5edff] text-blue-700': edge === opt.value }"
+              :class="{ 'bg-[#ede9fe] text-violet-700': edge === opt.value }"
               :title="opt.title"
               @click="pickEdge(opt.value)"
             >
@@ -831,7 +859,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
-        <div class="group relative">
+        <div
+          class="relative"
+          @mouseenter="scheduleMenu('export')"
+          @mouseleave="closeMenu"
+        >
           <button
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="导出"
@@ -839,7 +871,8 @@ onUnmounted(() => {
             <Export class="block h-4 w-4 shrink-0" />
           </button>
           <div
-            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+            class="absolute top-[calc(100%+10px)] right-0 z-20 min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
+            :class="openMenu === 'export' ? 'flex' : 'hidden'"
           >
             <button
               class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
@@ -869,7 +902,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 缩放：数字触发器 + 滑块面板 -->
-        <div class="group relative">
+        <div
+          class="relative"
+          @mouseenter="scheduleMenu('zoom')"
+          @mouseleave="closeMenu"
+        >
           <button
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="缩放"
@@ -877,10 +914,11 @@ onUnmounted(() => {
             <span class="text-[11px] tabular-nums">{{ zoom }}</span>
           </button>
           <div
-            class="absolute top-[calc(100%+10px)] right-0 z-20 hidden min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
+            class="absolute top-[calc(100%+10px)] right-0 z-20 min-w-45 flex-col items-center rounded-lg bg-white px-3.5 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
+            :class="openMenu === 'zoom' ? 'flex' : 'hidden'"
           >
             <input
-              class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-900 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+              class="h-1 w-35 cursor-pointer appearance-none rounded-full outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-violet-500 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-500 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
               :style="zoomTrackStyle"
               type="range"
               min="20"
@@ -1132,7 +1170,7 @@ onUnmounted(() => {
             class="flex h-6 cursor-pointer items-center gap-0.5 rounded-md px-2 text-[11px]"
             :class="
               sortKey === key
-                ? 'bg-[#e5edff] font-medium text-blue-700'
+                ? 'bg-[#ede9fe] font-medium text-violet-700'
                 : 'text-gray-500 hover:bg-gray-100'
             "
             @click="sortKey === key ? (sortAsc = !sortAsc) : (sortKey = key)"
@@ -1150,7 +1188,7 @@ onUnmounted(() => {
             v-for="d in sortedDocs"
             :key="d.id"
             class="group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
-            :class="{ 'bg-[#e5edff]': d.id === currentId }"
+            :class="{ 'bg-[#ede9fe]': d.id === currentId }"
             @click="openDoc(d.id)"
           >
             <File class="h-4 w-4 shrink-0 text-gray-400" />
@@ -1159,7 +1197,7 @@ onUnmounted(() => {
                 class="truncate text-xs"
                 :class="
                   d.id === currentId
-                    ? 'font-medium text-blue-700'
+                    ? 'font-medium text-violet-700'
                     : 'text-gray-800'
                 "
               >
