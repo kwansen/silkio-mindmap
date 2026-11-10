@@ -154,7 +154,12 @@ export class MindMap {
     // 输入时重新布局，编辑框就绪后交由激活控制器绑定按键与两态机；
     // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
     const editor = this.app.require(TEXT_EDITOR_CAPABILITY);
-    editor.onInput = () => this.relayout();
+    // 输入时重新布局，并同步发出变更通知（宿主 UI 如文档标题/自动保存随每次输入
+    // 实时更新；历史记录不受影响，仍由 onEditEnd 以整个编辑会话为一次变更入栈）
+    editor.onInput = () => {
+      this.relayout();
+      this.emitChange("text");
+    };
     editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);
     editor.onActivate = (text) => this.activation.activate(text);
     editor.onEditEnd = () => this.activation.onEditEnd();

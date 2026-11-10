@@ -362,7 +362,9 @@ const sortKey = ref<"createdAt" | "updatedAt">("updatedAt");
 const sortAsc = ref(false);
 const sortedDocs = computed(() => {
   const arr = [...docs.value];
-  arr.sort((a, b) => (sortAsc.value ? 1 : -1) * (a[sortKey.value] - b[sortKey.value]));
+  arr.sort(
+    (a, b) => (sortAsc.value ? 1 : -1) * (a[sortKey.value] - b[sortKey.value]),
+  );
   return arr;
 });
 // 当前打开的文档 id 与名称；空 id 表示尚未打开（首帧）
@@ -726,18 +728,28 @@ onUnmounted(() => {
     <div class="relative min-w-0 flex-1">
       <canvas ref="canvasRef" class="block h-full w-full bg-white"></canvas>
 
-      <!-- 文档切换器：点击弹出 dialog（新建导图 / 排序 / 打开历史导图 / 删除） -->
-      <div class="absolute top-4 left-4 z-10">
+      <!-- 文档切换器：标题按钮 + 新建按钮共用一个悬浮底座 -->
+      <div
+        class="absolute top-4 left-4 z-10 flex items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+      >
         <button
-          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-3 shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 hover:bg-gray-100"
           title="导图列表"
           @click="docsOpen = true"
         >
           <File class="h-4 w-4 shrink-0 text-gray-500" />
           <span class="max-w-40 truncate text-xs text-gray-800">
-            {{ docName || "加载中…" }}
+            {{ docName || "未命名标题" }}
           </span>
           <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
+        </button>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-gray-800 hover:bg-gray-100"
+          title="新建导图"
+          aria-label="新建导图"
+          @click="createNew()"
+        >
+          <Plus class="h-4 w-4 shrink-0" />
         </button>
       </div>
 
@@ -770,7 +782,10 @@ onUnmounted(() => {
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="布局方向"
           >
-            <component :is="layoutIcons[layout]" class="block h-4 w-4 shrink-0" />
+            <component
+              :is="layoutIcons[layout]"
+              class="block h-4 w-4 shrink-0"
+            />
           </button>
           <div
             class="absolute top-[calc(100%+10px)] right-0 z-20 hidden flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-[''] group-hover:flex"
@@ -783,7 +798,10 @@ onUnmounted(() => {
               :title="opt.title"
               @click="pickLayout(opt.value)"
             >
-              <component :is="layoutIcons[opt.value]" class="h-9 w-9 shrink-0" />
+              <component
+                :is="layoutIcons[opt.value]"
+                class="h-9 w-9 shrink-0"
+              />
             </button>
           </div>
         </div>
@@ -1018,7 +1036,9 @@ onUnmounted(() => {
               >
                 <span
                   :class="
-                    s.status === 'applied' ? 'text-emerald-500' : 'text-gray-300'
+                    s.status === 'applied'
+                      ? 'text-emerald-500'
+                      : 'text-gray-300'
                   "
                   >{{ s.status === "applied" ? "✓" : "–" }}</span
                 >
@@ -1050,9 +1070,7 @@ onUnmounted(() => {
               {{ aiPending.reasoning }}
             </div>
           </details>
-          <Suspense
-            v-if="aiPending.content && !isOpsStream(aiPending.content)"
-          >
+          <Suspense v-if="aiPending.content && !isOpsStream(aiPending.content)">
             <Markdown
               :value="aiPending.content"
               streaming
@@ -1104,19 +1122,12 @@ onUnmounted(() => {
       >
         <div class="mb-3 flex items-center gap-2">
           <span class="flex-1 text-sm font-medium text-gray-800">我的导图</span>
-          <button
-            class="flex h-7 cursor-pointer items-center gap-1 rounded-lg bg-gray-900 px-2.5 text-xs text-white hover:bg-gray-700"
-            @click="createNew()"
-          >
-            <Plus class="h-3.5 w-3.5 shrink-0" />
-            新建导图
-          </button>
         </div>
 
         <!-- 排序：创建时间 / 更新时间，点击切换升降序 -->
         <div class="mb-2 flex items-center gap-2">
           <button
-            v-for="key in (['createdAt', 'updatedAt'] as const)"
+            v-for="key in ['createdAt', 'updatedAt'] as const"
             :key="key"
             class="flex h-6 cursor-pointer items-center gap-0.5 rounded-md px-2 text-[11px]"
             :class="
@@ -1147,7 +1158,9 @@ onUnmounted(() => {
               <div
                 class="truncate text-xs"
                 :class="
-                  d.id === currentId ? 'font-medium text-blue-700' : 'text-gray-800'
+                  d.id === currentId
+                    ? 'font-medium text-blue-700'
+                    : 'text-gray-800'
                 "
               >
                 {{ d.name }}
@@ -1169,7 +1182,7 @@ onUnmounted(() => {
             v-if="!sortedDocs.length"
             class="py-8 text-center text-xs text-gray-400"
           >
-            还没有导图，点击上方「新建导图」开始
+            还没有导图，点击左上角「+」新建
           </div>
         </div>
       </div>
