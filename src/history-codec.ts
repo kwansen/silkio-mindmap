@@ -5,8 +5,9 @@
 // - 节点按 id 解析：先查会话注册表，再查树上（nodeById）；查不到且载荷内嵌了
 //   子树数据（add/paste/delete 的 node 字段）时经 renderNode(data, 0, true) 重建
 //   并登记整个子树的 id（保证跨命令引用同一实例）。
-// - 连线按 id 解析：先查模型连线表，再查会话注册表；查不到时按 (fromId,toId)
-//   端点重建（createEdge）并回写原 id。重建发生在 revive 阶段而非 redo 执行时，
+// - 连线按 id 解析：先查模型连线表，再查会话注册表（命中须端点与解析出的
+//   from/to 一致）；不一致或查不到时按 (fromId,toId) 端点重建（createEdge）并
+//   回写原 id。重建发生在 revive 阶段而非 redo 执行时，
 //   同一连线的 redo/undo 共用同一对象，重放不会重复创建。
 //
 // 复合命令（core 的 composite kind）在此解码为 compose(...)，子命令递归走本解码器。
@@ -90,20 +91,26 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
     return node;
   }
 
-  // 连线解析：模型连线表 → 注册表；都没有则按端点重建并回写原 id
-  //（载荷 id 可空，null 视为解析失败返回 null，由调用方整体放弃导入）
+  // 连线解析：模型连线表 → 注册表（命中须端点一致）→ 按 (fromId,toId) 端点重建
+  // 并回写原 id（载荷 id 可空，null 视为解析失败返回 null，由调用方整体放弃导入）。
+  // 端点一致性校验：解码会话可能为同一 id 重建了全新节点实例（如 render 的 after
+  // 侧总是全新重建并覆盖登记），现存连线/注册表连线仍指向重建前的旧实例——此时
+  // 直接复用会让命令重放的连线端点与同批重建的节点实例脱节（连线锚点跟随不在
+  // 场景树内的旧节点），故按解析出的端点重建并覆盖注册
   function resolveEdge(
     id: string | null | undefined,
     fromId: string | null | undefined,
     toId: string | null | undefined,
   ): MindEdge | null {
     if (!id) return null;
-    const live = model.edges.find((e) => e.id === id);
-    if (live) return live;
-    const cached = edges.get(id);
-    if (cached) return cached;
     const from = resolveNode(fromId);
     const to = resolveNode(toId);
+    const live = model.edges.find(
+      (e) => e.id === id && e.fromNode === from && e.toNode === to,
+    );
+    if (live) return live;
+    const cached = edges.get(id);
+    if (cached && cached.fromNode === from && cached.toNode === to) return cached;
     if (!from || !to) return null;
     const edge = model.createEdge(from, to);
     edge.id = id;

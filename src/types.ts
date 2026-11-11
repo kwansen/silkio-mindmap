@@ -60,8 +60,15 @@ export interface MindMapOptions {
   // 按级数的样式配置：index 0 为根节点（一级），依次向深层级递增，超出配置长度时套用最后一项。
   // 节点数据上的 style 优先于级数配置；新建节点（Tab/Enter）按其级数取样式
   levelStyles?: Style[];
-  // 数据变化回调：结构变化（新增/删除/拖拽换父）或文本编辑结束且重布局落定后触发，
-  // 供宿主持久化等后续操作；当前数据用 toJSON() 导出
+  // 布局间距：levelGap 父子间距（横向布局为水平间距、纵向为垂直间距），
+  // siblingGap 兄弟间距（横向布局为垂直间距、纵向为水平间距），默认 48 / 12。
+  // init 初始布局与 relayout 重布局共用同一份配置，避免两处硬编码漂移
+  levelGap?: number;
+  siblingGap?: number;
+  // 数据变化回调：结构变化（新增/删除/拖拽换父/折叠切换/方向与连线样式）在重布局
+  // 落定后触发；文本编辑在每次输入（重布局落定后）与编辑会话结束时各触发一次，
+  // 宿主可据此做实时保存；undo/redo 以回退的变更类型触发（不产生新变更）。
+  // 当前数据用 toJSON() 导出
   onChange?: (type: MindMapChangeType) => void;
   // 连线样式：'bezier' 单段贝塞尔 S 曲线（默认），'path' 父级水平直线引出 + Z 字折线接入，
   // 'rPath' 同 path 但第二个弯折带圆角

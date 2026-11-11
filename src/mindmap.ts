@@ -97,11 +97,17 @@ export class MindMap {
   // 已登记点击激活的节点（WeakSet 去重）：bindNode 为命令 redo 挂载路径的统一
   // 登记入口（见 commands.ts），重复挂载/换树重放不重复登记
   private boundNodes = new WeakSet<Text>();
+  // 布局间距（MindMapOptions.levelGap/siblingGap，缺省 48/12）：init 初始布局与
+  // relayout 重布局共用同一份，避免两处硬编码漂移
+  private levelGap: number;
+  private siblingGap: number;
 
   constructor(options: MindMapOptions) {
     this.dir = { value: options.direction ?? "left" };
     const edgeStyle = options.edgeStyle ?? "bezier";
     const levelStyles = options.levelStyles ?? [];
+    this.levelGap = options.levelGap ?? 48;
+    this.siblingGap = options.siblingGap ?? 12;
     this.onChange = options.onChange;
     // 显式装配（starter-kit 模式）：宿主自建 App 并装配官方外部插件（通常用
     // @silker/preset 的 officialPlugins()，实现均可按契约替换），本场景只补齐
@@ -512,8 +518,8 @@ export class MindMap {
     this.model.applyCollapseVisibility();
     await this.layout.layout(root, {
       direction: this.dir.value,
-      levelGap: 48,
-      siblingGap: 12,
+      levelGap: this.levelGap,
+      siblingGap: this.siblingGap,
     });
     this.pan!.center(this.model.getBounds(root));
     // destroy 可能先于异步布局完成：已拆卸则不再挂载任何节点
@@ -538,8 +544,8 @@ export class MindMap {
     this.model.applyCollapseVisibility();
     await this.layout.layout(this.model.root, {
       direction: this.dir.value,
-      levelGap: 48,
-      siblingGap: 12,
+      levelGap: this.levelGap,
+      siblingGap: this.siblingGap,
     });
     this.app.requestRender();
     // 布局会移动节点，编辑框必须在对齐一次，否则覆盖在旧位置上

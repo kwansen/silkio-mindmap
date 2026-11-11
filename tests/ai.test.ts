@@ -254,6 +254,16 @@ describe("AIEditingController.compile：批内 move + delete 的连线清理", (
       levelStyle: () => ({}),
       applyCollapseVisibility: () => {},
       applyNodeStyle: () => {},
+      // move 落点在折叠节点下时 ai 编译路径会先展开目标（同 add 纪律，见 ai.ts）
+      expand: () => {},
+      // move 命令换线走连线原语（见 commands.ts 换父纪律）：桩实现真实挂载/摘除语义
+      mountEdges: (es: any[]) => {
+        model.edges.push(...es);
+      },
+      unmountEdges: (es: any[]) => {
+        const gone = new Set(es);
+        model.edges = model.edges.filter((e: any) => !gone.has(e));
+      },
       createEdge: (from: any, to: any) => fakeEdge(`e-${from.id}-${to.id}`, from, to),
       serializeForHistory: (node: any): any => ({
         id: node.id,

@@ -24,6 +24,13 @@ export interface AutoLayoutOptions {
 // 2. 只写 x/y，不改 width/height/collapsed/children 结构——尺寸重测是宿主的职责
 // 3. 根节点自身的 x/y 不动，只排布后代
 // 4. 同步签名：布局是纯计算，异步需求（如动画）由实现方在能力之外自行叠加
+// 5. 几何语义约束：交互层（拖放落点 dropTarget/dropIndex、折叠开关 CollapseToggle、
+//    键盘导航 sideOf）按"子侧朝向 = 几何方向差"判定，布局结果必须满足——
+//    'right'：子节点位于父节点右侧（x > 父 x）；'left'：位于左侧（x < 父 x）；
+//    'down'：子节点位于父节点下方（y > 父 y）且兄弟子树水平排列；
+//    'both'：根节点的子树左右分堆——左分子树整体在根左侧（x < 根 x）、右分在根
+//    右侧（x > 根 x），各侧子树仍按横向骨架（见上方 AutoLayoutOptions 注释中的
+//    朝向定义）排布。偏离即静默误判：交互层不做二次协商，契约是唯一防线
 export interface AutoLayoutCapability {
   layout(root: Node, options: AutoLayoutOptions): void
 }
