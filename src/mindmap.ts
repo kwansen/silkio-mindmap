@@ -182,8 +182,10 @@ export class MindMap {
     // 点击仅激活（常驻覆盖层 + 画布高亮环），进入编辑由打字或点击覆盖层触发
     const editor = this.app.require(TEXT_EDITOR_CAPABILITY);
     // 输入时重新布局，并同步发出变更通知（宿主 UI 如文档标题/自动保存随每次输入
-    // 实时更新；历史记录不受影响，仍由 onEditEnd 以整个编辑会话为一次变更入栈）
-    editor.onInput = (text) => {
+    // 实时更新；历史记录不受影响，仍由 onEditEnd 以整个编辑会话为一次变更入栈）。
+    // 编辑回调载荷为能力契约的 EditableText，本场景以具体 Text 节点工作，在接线处收窄
+    editor.onInput = (payload) => {
+      const text = payload as Text;
       void this.relayout().then(() => {
         // autoWidth 节点随输入长宽，可能越出视口：布局落定后按新包围盒平移
         // （原 text-editor 插件的输入跟随行为上移至场景）
@@ -200,8 +202,8 @@ export class MindMap {
       });
       this.emitChange("text");
     };
-    editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);
-    editor.onActivate = (text) => this.activation.activate(text);
+    editor.onEditStart = (el, text) => this.activation.onEditStart(el, text as Text);
+    editor.onActivate = (text) => this.activation.activate(text as Text);
     editor.onEditEnd = () => this.activation.onEditEnd();
     this.editor = editor;
     // 选中：按能力键取回宿主装配（通常为官方预设）的实例。
