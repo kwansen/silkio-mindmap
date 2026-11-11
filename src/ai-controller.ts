@@ -214,6 +214,9 @@ export class AIEditingController {
   } {
     const { model, app, bindNode } = this.deps;
     const root = model.root!;
+    // 树索引快照（O(n) 一次遍历）：批内多次按 id 查找复用，避免逐次 nodeById
+    // 全树遍历（O(n·k)）。编译期结构不变（expand 只改折叠标志），快照有效
+    const treeIndex = model.indexById();
     // 批内会话注册表：新建节点 id → 运行时节点（redo 前不在树上，nodeById 查不到）
     const session = new Map<string, Text>();
     // 批内新建（尚未入模型连线表）的连线：move 的旧连线查找需覆盖这些；
@@ -222,6 +225,10 @@ export class AIEditingController {
     // 批内已删除目标节点 id → 删除发生的操作序号（"第 N 项"）：delete 引用已删
     // 子树内节点时记为跳过（子树已随前者一并删除），其余操作引用即编译失败
     const deleted = new Map<string, string>();
+    // 批内已移动的节点 id：同一节点在批内移动两次会让后一条 move 命令定格的
+    // oldParent/oldIndex 失真（undo 回到错误位置），move 后再删除会让 delete 命令
+    // 的定格父级失真——编译期即拒绝，请拆分为多次 run
+    const moved = new Set<string>();
     const commands: HistoryCommand[] = [];
     const created: Text[] = [];
     // 逐步执行反馈链：宿主可直接展示，便于定位"编辑看不到效果"类问题
@@ -238,7 +245,7 @@ export class AIEditingController {
     });
 
     const byId = (id: string): Text | null =>
-      session.get(id) ?? model.nodeById(id);
+      session.get(id) ?? treeIndex.get(id) ?? null;
     // 目标解析（target 缺省锚点节点）。target 四种形态：
     // 1. 节点 id（最稳，含批内新建）；2. 路径 "A/B/C"（同名消歧首选）；
     // 3. "文本[n]"（第 n 个同名节点，先序 1 起）；4. 纯文本（全局唯一时直接命中，
@@ -362,6 +369,10 @@ export class AIEditingController {
       if (op.op === "move") {
         const node = ensureTarget(op.target, no);
         if (node === model.root) throw new Error(`AI 不能移动根节点${no}`);
+        if (moved.has(node.id!))
+          throw new Error(
+            `节点「${node.text}」在本批内已被移动，同批内不能再次移动同一节点${no}（请拆分为多次执行）`,
+          );
         const newParent = op.parent ? ensureTarget(op.parent, no) : root;
         // 不能移动到自身子树内（会成环）
         const subtree = new Set<object>();
@@ -430,6 +441,7 @@ export class AIEditingController {
           status: "applied",
           target: targetOf(node),
         });
+        moved.add(node.id!);
         focus = node;
         continue;
       }
@@ -541,6 +553,10 @@ export class AIEditingController {
         continue;
       }
       if (node === model.root) throw new Error("AI 不能删除根节点");
+      if (moved.has(node.id!))
+        throw new Error(
+          `节点「${node.text}」在本批内已被移动，同批内不能移动后再删除同一节点${no}（请拆分为多次执行）`,
+        );
       const parent = node.parent as Text;
       const index = parent.children.indexOf(node);
       // 编译期子树仅用于反馈文案（"及其 N 个子节点"）；死连线在 redo 时按当时

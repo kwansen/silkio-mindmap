@@ -1,4 +1,5 @@
 import type { App, HistoryCommand, Node, Text } from "@silker/core";
+import { invariant } from "./invariants";
 import type { MindEdge } from "./Edge";
 import type { MindTree } from "./model";
 import type { Style } from "./types";
@@ -21,6 +22,8 @@ import type {
 // - redo/undo 中挂载的节点一律经 deps.bindNode 登记点击激活（编解码器重建的节点
 //   无其它绑定入口，漏登记即无法点击激活）；
 // - toJSON 载荷形状由 history-payloads.ts 编译期锁定（MindmapSerialized）。
+// - 上述纪律经 invariants.ts 断言兜底：redo/undo 的挂载/摘除对称、节点当前父级与
+//   命令定格一致、连线表成员合法——违例即抛错，不再静默腐蚀历史重放。
 // 编解码器重建命令时以原始载荷覆写 toJSON（透传保持"导入后再导出"数据稳定，
 // 见 history-codec.ts 各 decode* 注释）。
 
@@ -52,11 +55,19 @@ export function makeAddCommand(
   return {
     type: "add",
     redo: () => {
+      invariant(
+        !ins.parent.children.includes(ins.node),
+        "add.redo: 节点已挂在父级下（重复执行 redo 或结构被绕开命令改动）",
+      );
       ins.parent.attachChild(ins.node, ins.index);
       deps.model.mountEdges([ins.edge]);
       deps.bindNode?.(ins.node);
     },
     undo: () => {
+      invariant(
+        ins.parent.children.includes(ins.node),
+        "add.undo: 节点不在父级下（重复执行 undo 或结构被绕开命令改动）",
+      );
       ins.parent.detachChild(ins.node);
       deps.model.unmountEdges([ins.edge]);
     },
@@ -91,6 +102,10 @@ export function makePasteCommand(
     type: "add",
     redo: () => {
       inserts.forEach(({ parent, node, edge, inner, index }) => {
+        invariant(
+          !parent.children.includes(node),
+          "paste.redo: 节点已挂在父级下（重复执行 redo 或结构被绕开命令改动）",
+        );
         parent.attachChild(node, index);
         deps.model.mountEdges([edge, ...inner]);
         deps.bindNode?.(node);
@@ -99,6 +114,10 @@ export function makePasteCommand(
     undo: () => {
       for (let i = inserts.length - 1; i >= 0; i--) {
         const { parent, node, edge, inner } = inserts[i];
+        invariant(
+          parent.children.includes(node),
+          "paste.undo: 节点不在父级下（重复执行 undo 或结构被绕开命令改动）",
+        );
         parent.detachChild(node);
         deps.model.unmountEdges([edge, ...inner]);
       }
@@ -154,13 +173,25 @@ export function makeDeleteCommand(
     redo: () => {
       const dead = deadEdges ?? computeDead();
       deadEdges = dead;
-      captures.forEach(({ node, parent }) => parent.remove(node));
+      captures.forEach(({ node, parent }) => {
+        // 惰性定格死连线依赖"exec 立即执行 redo 且编译期结构未变"：节点当前父级
+        // 若与定格父级不一致（如同批内已移动该节点），死连线计算与摘除都会失真
+        invariant(
+          (node.parent as Text | null) === parent,
+          "delete.redo: 节点当前父级与命令定格父级不一致（同批内移动后再删除等时序破坏）",
+        );
+        parent.remove(node);
+      });
       deps.model.unmountEdges(dead);
     },
     undo: () => {
       // 逆序插回：同父多目标按索引从大到小还原，前序插入不影响后序索引
       for (let i = captures.length - 1; i >= 0; i--) {
         const { node, parent, index } = captures[i];
+        invariant(
+          !parent.children.includes(node),
+          "delete.undo: 节点仍在父级下（重复执行 undo 或结构被绕开命令改动）",
+        );
         parent.attachChild(node, index);
       }
       const dead = deadEdges ?? [];
@@ -209,6 +240,12 @@ export function makeMoveCommand(
     type: "move",
     redo: () => {
       for (const m of moves) {
+        // 节点当前父级须与命令定格一致：同批内重复移动同一节点会让本命令的
+        // oldParent 失真（undo 回到错误父级），编译期已拒绝，此处兜底校验
+        invariant(
+          (m.node.parent as Text | null) === m.oldParent,
+          "move.redo: 节点当前父级与命令定格 oldParent 不一致（同批内重复移动等时序破坏）",
+        );
         m.oldParent.remove(m.node);
         m.newParent.attachChild(m.node, m.newIndex);
         // 换线：移除旧父连线，加入新父连线（同父排序 newEdge === oldEdge 时跳过）
@@ -222,6 +259,10 @@ export function makeMoveCommand(
     },
     undo: () => {
       for (const m of [...moves].reverse()) {
+        invariant(
+          (m.node.parent as Text | null) === m.newParent,
+          "move.undo: 节点当前父级与命令定格 newParent 不一致（重复执行 undo 或结构被绕开命令改动）",
+        );
         m.newParent.remove(m.node);
         m.oldParent.attachChild(m.node, m.oldIndex);
         // 换线反向：移除新父连线，还原旧父连线

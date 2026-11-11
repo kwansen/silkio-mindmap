@@ -244,6 +244,12 @@ describe("AIEditingController.compile：批内 move + delete 的连线清理", (
       styleOf: () => ({}),
       customStyleOf: () => ({}),
       nodeById: (id: string) => [a, x, b, c].find((t) => t.id === id) ?? null,
+      // compile 用树索引快照替代逐次 nodeById（见 ai-controller.ts），桩按同语义实现
+      indexById: () => {
+        const map = new Map<string, any>();
+        [a, x, b, c].forEach((t) => map.set(t.id, t));
+        return map;
+      },
       depthOf: (node: any) => {
         let d = 0;
         let p = node.parent;

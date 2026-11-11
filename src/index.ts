@@ -1,5 +1,7 @@
 // 统一导出 MindMap 与相关类型
 export { MindMap } from "./mindmap"
+// 包内不变量断言开关：生产环境可关闭（默认开启，违例即抛错）
+export { setInvariantsEnabled } from "./invariants"
 export type {
   Style,
   MindMapNode,

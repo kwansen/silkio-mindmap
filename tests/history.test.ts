@@ -270,7 +270,8 @@ describe("history-codec：载荷往返与解码后重放", () => {
     // 死连线惰性定格：exec（redo）先于 toJSON（与生产时序一致），载荷才含完整 dead
     cmd.redo();
     const payload = cmd.toJSON();
-    cmd.redo(); // 最终态：子树已删、死连线已清
+    // 最终态：子树已删、死连线已清（redo/undo 严格交替，不可重复 redo——
+    // 命令 redo 的结构不变量断言会拦截双 redo 的时序破坏）
     sameEdges(tree, [eRB]);
     const decoded = codecFor(tree).decode(payload as unknown as SerializedCommand);
     expect(decoded).not.toBeNull();

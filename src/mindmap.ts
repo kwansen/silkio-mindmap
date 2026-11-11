@@ -246,7 +246,12 @@ export class MindMap {
       model: this.model,
       direction: this.dir,
       sel: this.sel,
-      isBusy: () => this.drag.dragState !== null || this.sel.marqueeActive,
+      // 拖拽或框选进行中（编辑不算：折叠开关在编辑会话中仍可用），
+      // 谓词由 busyState 单一出处派生
+      isBusy: () => {
+        const state = this.busyState();
+        return state.dragging || state.marquee;
+      },
       requestRender: () => this.app.requestOverlayRender(),
       onRelayout: () => this.relayout(),
       onDeactivate: () => this.activation.deactivate(),
@@ -339,10 +344,21 @@ export class MindMap {
     });
   }
 
-  // 交互忙判定（唯一谓词）：编辑会话中或拖拽进行中视为忙——撤销/重做/全选等
+  // 交互忙状态单一出处：各入口的避让谓词（门面 busy、折叠开关 isBusy）均由本方法
+  // 派生——新增交互态（如动画锁）只改这里，避免多处谓词手写漂移
+  private busyState() {
+    return {
+      editing: this.activation.editing,
+      dragging: this.drag.dragState !== null,
+      marquee: this.sel.marqueeActive,
+    };
+  }
+
+  // 交互忙判定：编辑会话中或拖拽进行中视为忙——撤销/重做/全选等
   // 全局变更入口据此避让，避免与进行中的变更互踩（此前各入口重复手写同一对条件）
   private get busy(): boolean {
-    return this.activation.editing || this.drag.dragState !== null;
+    const state = this.busyState();
+    return state.editing || state.dragging;
   }
 
   // 全选：全部可见节点进入多选态（高亮环 + 批量拖拽/删除/复制可用）。

@@ -1,5 +1,6 @@
 import { Text } from "@silker/core";
 import type { App, EdgeShape } from "@silker/core";
+import { invariant } from "./invariants";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";
 import type { PasteInsert } from "./commands";
@@ -16,6 +17,10 @@ export class MindTree {
   // 全部父子连线（私有真值，换父/增删节点时经 mount/unmount/replace 原语同步维护；
   // 外部经 edges 只读访问器消费）
   private _edges: MindEdge[] = [];
+  // 连线身份集合（_edges 的 O(1) 成员查询镜像）：仅由下方三原语同步维护，
+  // 断言消费——重复挂载/摘除不存在连线等"双写漂移"类错误在原语入口即暴露。
+  // 不参与任何业务逻辑（查询仍走 _edges 或端点匹配）
+  private _edgeSet = new Set<MindEdge>();
   // 连线表只读访问器：查询类消费方（死连线计算/连线查找/导出）按只读序列消费，
   // 编译期阻断外部直写（push/赋值），结构变更必须走 mount/unmount/replace 原语
   get edges(): readonly MindEdge[] {
@@ -63,12 +68,20 @@ export class MindTree {
   // 重建统一走此收口——模型连线表与场景连线层由同一处维护，命令闭包不再手工双写
   //（此前遗漏一处即静默脏数据，是双份真值问题的收口点）
   mountEdges(edges: MindEdge[]) {
+    for (const e of edges) {
+      invariant(!this._edgeSet.has(e), "mountEdges: 连线已在连线表中（重复挂载）");
+      this._edgeSet.add(e);
+    }
     this._edges.push(...edges);
     this.app?.add(edges);
   }
 
   // 从连线表与场景中摘除指定连线（按对象同一性过滤）
   unmountEdges(edges: MindEdge[]) {
+    for (const e of edges) {
+      invariant(this._edgeSet.has(e), "unmountEdges: 连线不在连线表中（摘除不存在的连线）");
+      this._edgeSet.delete(e);
+    }
     const set = new Set(edges);
     this._edges = this._edges.filter((e) => !set.has(e));
     this.app?.remove(edges);
@@ -79,6 +92,9 @@ export class MindTree {
     const prev = [...this._edges];
     this._edges.length = 0;
     this._edges.push(...next);
+    // 重建身份镜像；替换表内不得含重复连线（成员数须与表长一致）
+    this._edgeSet = new Set(next);
+    invariant(this._edgeSet.size === next.length, "replaceEdges: 替换表内存在重复连线");
     if (this.app) {
       this.app.remove(prev);
       this.app.add(next);
@@ -180,6 +196,20 @@ export class MindTree {
     };
     walk(this.root);
     return found;
+  }
+
+  // 一次性建立 id → 节点索引（O(n) 快照）：供 AI 编译等"同批内多次按 id 查找"
+  // 的场景复用，避免逐次 nodeById 全树遍历（O(n·k)）。编译期结构不变
+  //（expand 只改折叠标志不动结构），快照在批内有效；结构变更后须重建
+  indexById(): Map<string, Text> {
+    const map = new Map<string, Text>();
+    if (!this.root) return map;
+    const walk = (n: Text) => {
+      map.set(n.id!, n);
+      n.children.forEach((c) => walk(c as Text));
+    };
+    walk(this.root);
+    return map;
   }
 
   // 折叠可见性联动：折叠节点的整个子树置为不可见（含连线），展开则恢复可见。
