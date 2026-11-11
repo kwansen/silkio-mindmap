@@ -2,6 +2,7 @@
 import type { HistoryCapability } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import type { TextEditorCapability } from "@silker/core";
+import { makeTextCommand } from "./commands";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import type { MindMapChangeType } from "./types";
 
@@ -113,23 +114,9 @@ export class ActivationController {
     // （此时覆盖层内容已同步进节点）；record 仅入栈不执行，因变更已发生
     const old = this.editingOld;
     if (old.node && old.node.text !== old.text) {
-      const node = old.node;
-      const before = old.text;
-      const after = node.text;
-      this.deps.history.record({
-        type: "text",
-        redo: () => {
-          node.text = after;
-        },
-        undo: () => {
-          node.text = before;
-        },
-        // 序列化载荷：节点按 id 引用，before/after 为纯文本快照
-        toJSON: () => ({
-          kind: "mindmap.text",
-          payload: { nodeId: node.id, before, after },
-        }),
-      });
+      this.deps.history.record(
+        makeTextCommand(old.node, old.text, old.node.text),
+      );
     }
     this.deps.emitChange("text");
   }

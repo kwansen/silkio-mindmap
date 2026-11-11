@@ -1,9 +1,9 @@
 import { Text } from "@silker/core";
-import type { EdgeShape } from "@silker/core";
+import type { App, EdgeShape } from "@silker/core";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";
 import { defaultStyle } from "./types";
-import type { LayoutDirection, MindMapNode, Style } from "./types";
+import type { LayoutDirection, LayoutDirectionRef, MindMapNode, Style } from "./types";
 
 // 思维导图数据模型：持有节点树与连线集合，负责建模（数据 → Text 树）、级数样式解析、
 // 折叠可见性联动与序列化导出。只做模型维护，不涉及交互与覆盖层（各 controller 单向依赖本模块）
@@ -20,31 +20,72 @@ export class MindTree {
   readonly customStyles = new WeakMap<Text, Style>();
   // 连线样式（构造时从 options 记录）
   private edgeStyle: EdgeShape;
-  // 布局方向（构造时从 options 记录）：down 时父子连线为纵向（父底缘连子顶缘），
-  // both 时根节点的子树分堆左右两侧（连线仍为横向，锚点按父子相对位置自适应）
-  private direction: "left" | "right" | "down" | "both";
+  // 布局方向共享引用（门面创建并分发，切换方向只改这一处状态）：
+  // down 时父子连线为纵向（父底缘连子顶缘），both 时根节点的子树分堆左右两侧
+  //（连线仍为横向，锚点按父子相对位置自适应）
+  readonly directionRef: LayoutDirectionRef;
+  // 场景增删入口（可选，测试/纯数据场景缺省）：连线表同步原语经此同步场景连线层，
+  // 缺省时只维护连线表本身
+  private app: Pick<App, "add" | "remove"> | null;
 
   constructor(options: {
     levelStyles: Style[];
     edgeStyle: EdgeShape;
-    direction?: "left" | "right" | "down" | "both";
+    direction?: LayoutDirectionRef;
+    app?: Pick<App, "add" | "remove">;
   }) {
     this.levelStyles = options.levelStyles;
     this.edgeStyle = options.edgeStyle;
-    this.direction = options.direction ?? "left";
+    this.directionRef = options.direction ?? { value: "left" };
+    this.app = options.app ?? null;
   }
 
-  // 切换布局方向：更新自有方向状态并翻转既有连线的纵向标志（连线类别只由 edgeStyle
-  // 决定，横向/纵向渲染由 vertical 标志在渲染时动态分支，无需重建连线对象）
-  setDirection(direction: LayoutDirection) {
-    this.direction = direction;
+  // 方向切换的模型侧联动：方向状态由门面经共享 ref 直接改写（directionRef.value = d），
+  // 本方法只翻转既有连线的纵向标志（连线类别只由 edgeStyle 决定，横向/纵向渲染由
+  // vertical 标志在渲染时动态分支，无需重建连线对象）
+  applyDirection(direction: LayoutDirection) {
     const vertical = direction === "down";
     this.edges.forEach((e) => (e.vertical = vertical));
   }
 
+  // 连线表与场景的同步原语（唯一出口）：命令 redo/undo、连线样式切换、编解码器
+  // 重建统一走此收口——模型连线表与场景连线层由同一处维护，命令闭包不再手工双写
+  //（此前遗漏一处即静默脏数据，是双份真值问题的收口点）
+  mountEdges(edges: MindEdge[]) {
+    this.edges.push(...edges);
+    this.app?.add(edges);
+  }
+
+  // 从连线表与场景中摘除指定连线（按对象同一性过滤）
+  unmountEdges(edges: MindEdge[]) {
+    const set = new Set(edges);
+    this.edges = this.edges.filter((e) => !set.has(e));
+    this.app?.remove(edges);
+  }
+
+  // 整表替换：摘除当前全部连线、换入新连线表（对象引用稳定，undo/redo 双向可用）
+  replaceEdges(next: MindEdge[]) {
+    const prev = [...this.edges];
+    this.edges.length = 0;
+    this.edges.push(...next);
+    if (this.app) {
+      this.app.remove(prev);
+      this.app.add(next);
+    }
+  }
+
+  // 展开折叠节点（唯一出口）：翻标志并联动可见性。新建/粘贴/外部文本/拖入/AI 移入
+  // 等所有"目标折叠先展开"路径统一走此原语，避免多处手写漂移
+  expand(node: Text) {
+    if (!node.collapsed) return;
+    node.collapsed = false;
+    this.applyCollapseVisibility();
+  }
+
   // 切换连线样式：bezier 与 path 系是两个连线类，无法原地改 shape，按新样式重建全部
   // 连线对象并继承原连线的纵向标志、可见性与 id（id 稳定保证历史命令按 id 解析的
-  // 引用一致性）；edges 数组原地替换（引用持有方无感）。
+  // 引用一致性）。场景换入换出经 replaceEdges 原语同步（模型连线表与场景连线层
+  // 由同一处维护）。
   // 样式未变化时不做任何事，返回 null；变化时返回切换前的样式（历史命令载荷取 before）
   setEdgeStyle(shape: EdgeShape): EdgeShape | null {
     if (shape === this.edgeStyle) return null;
@@ -57,14 +98,13 @@ export class MindTree {
       ne.visible = e.visible;
       return ne;
     });
-    this.edges.length = 0;
-    this.edges.push(...next);
+    this.replaceEdges(next);
     return before;
   }
 
   // 按连线样式创建父子连线（统一入口，三处创建点共用）；纵向布局（down）创建垂直连线
   createEdge(from: Text, to: Text): MindEdge {
-    if (this.direction === "down") {
+    if (this.directionRef.value === "down") {
       if (this.edgeStyle === "bezier") return new MindMapEdge(from, to, true);
       return new MindPathEdge(from, to, this.edgeStyle, true);
     }
@@ -205,8 +245,9 @@ export class MindTree {
   // 交互层（折叠/导航/拖放）据此按节点逐个判定，无需布局回传分堆结果。
   // 纵向布局（down）与根节点本身返回 'right'（调用方仅在横向语境消费）
   sideOf(node: Text): "left" | "right" {
-    if (this.direction === "down") return "right";
-    if (this.direction !== "both") return this.direction;
+    const direction = this.directionRef.value;
+    if (direction === "down") return "right";
+    if (direction !== "both") return direction;
     if (!this.root || node === this.root) return "right";
     const rp = this.root.getWorldPoint();
     const p = node.getWorldPoint();

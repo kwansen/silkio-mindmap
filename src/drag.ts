@@ -1,10 +1,11 @@
 import { App, EdgePan, Text } from "@silker/core";
 import type { Node } from "@silker/core";
 import type { ViewportCapability } from "@silker/core";
-import type { HistoryCapability, HistoryCommand } from "@silker/core";
+import type { HistoryCapability } from "@silker/core";
 import { POINTER_CAPABILITY } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import { DragGhost } from "./DragGhost";
+import { makeMoveCommand } from "./commands";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import { dropIndex, dropTarget } from "./drop";
 import { ACTIVE_COLOR } from "./editing";
@@ -13,7 +14,7 @@ import type { CollapseController } from "./collapse";
 import type { KeyboardNav } from "./keyboard";
 import type { MindEdge } from "./Edge";
 import type { MindTree } from "./model";
-import type { MindMapChangeType, Style, LayoutDirection } from "./types";
+import type { MindMapChangeType, Style, LayoutDirectionRef } from "./types";
 
 // 拖拽上下文：起点（屏幕/世界）、拖动的子树根、起始局部坐标与合集原始包围盒
 export interface DragState {
@@ -40,7 +41,8 @@ export interface DragDeps {
   collapse: Pick<CollapseController, "hit" | "toggle" | "onMove" | "onLeave">;
   activation: Pick<ActivationController, "deactivate" | "wake" | "setSelection">;
   keyboard: Pick<KeyboardNav, "onGlobalKeydown">;
-  direction: LayoutDirection;
+  // 布局方向共享引用（门面分发，切换方向只改 ref.value，无需逐模块同步）
+  direction: LayoutDirectionRef;
   onRelayout: () => Promise<void> | void;
   emitChange: (type: MindMapChangeType) => void;
 }
@@ -73,11 +75,6 @@ export class DragInteractions {
 
   constructor(private deps: DragDeps) {
     this.edgePan = new EdgePan(deps.app, (x, y) => this.updateDrag({ clientX: x, clientY: y }));
-  }
-
-  // 切换布局方向：落点判定（横向/纵向分支）按新方向动态计算（dropTarget/dropIndex 运行时读取）
-  setDirection(direction: LayoutDirection) {
-    this.deps.direction = direction;
   }
 
   // 左键交互（框选 + 拖拽换父）：
@@ -306,7 +303,7 @@ export class DragInteractions {
       this.deps.app.children,
       this.deps.ghost.floatBox,
       subtree,
-      this.deps.direction,
+      this.deps.direction.value,
       (n) => this.deps.model.sideOf(n),
       this.deps.model.root,
     );
@@ -399,10 +396,7 @@ export class DragInteractions {
     const parent = target && !subtree.has(target) ? target : null;
     if (parent) {
       // 目标处于折叠态时先展开，避免挂载后的节点被可见性联动隐藏
-      if (parent.collapsed) {
-        parent.collapsed = false;
-        this.deps.model.applyCollapseVisibility();
-      }
+      this.deps.model.expand(parent);
       // 同一目标父级插入多个节点时依次后移；基座索引按原子节点位置只算一次
       const insertIndex = new Map<Text, number>();
       // 摘除前定格每个被移动节点的原父级/原位置/原样式与两侧连线，命令据此重放与逆放
@@ -410,6 +404,7 @@ export class DragInteractions {
         node: Text;
         oldParent: Text;
         oldIndex: number;
+        newParent: Text;
         newIndex: number;
         oldStyle: Style;
         newStyle: Style;
@@ -421,7 +416,7 @@ export class DragInteractions {
         // 原父级也在被拖子树内（多选时父子同选）：保持原父子结构，跟随父级一起挂载
         if (subtree.has(old)) continue;
         // 基于落点中心位置插入到目标子节点列表的对应位置，而非一律追加到最后
-        let newIndex = insertIndex.get(parent) ?? dropIndex(parent, dropPoint, this.deps.direction);
+        let newIndex = insertIndex.get(parent) ?? dropIndex(parent, dropPoint, this.deps.direction.value);
         insertIndex.set(parent, newIndex + 1);
         // 同父移动：落点序号按原布局含自身统计，落在原位置之后时需扣掉自身；
         // 扣除后与原位置相同则确实无变化，跳过
@@ -435,6 +430,7 @@ export class DragInteractions {
             node: n,
             oldParent: old,
             oldIndex: old.children.indexOf(n),
+            newParent: parent,
             newIndex,
             oldStyle: this.deps.model.nodeStyles.get(n)!,
             newStyle: this.deps.model.nodeStyles.get(n)!,
@@ -456,6 +452,7 @@ export class DragInteractions {
           node: n,
           oldParent: old,
           oldIndex: old.children.indexOf(n),
+          newParent: parent,
           newIndex,
           oldStyle: this.deps.model.nodeStyles.get(n)!,
           newStyle,
@@ -463,54 +460,8 @@ export class DragInteractions {
           newEdge: this.deps.model.createEdge(parent, n),
         });
       }
-      // 移动命令：多选目标合并为一条，undo 一次全回退（逆序插回，防同父索引失效）
-      const cmd: HistoryCommand = {
-        type: "move",
-        redo: () => {
-          for (const m of moves) {
-            m.oldParent.remove(m.node);
-            parent.attachChild(m.node, m.newIndex);
-            // 换线：移除旧父连线，加入新父连线
-            this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.oldEdge);
-            this.deps.app.remove(m.oldEdge);
-            this.deps.model.edges.push(m.newEdge);
-            this.deps.app.add(m.newEdge);
-            if (this.deps.model.levelStyles.length)
-              this.deps.model.applyNodeStyle(m.node, m.newStyle);
-          }
-        },
-        undo: () => {
-          for (const m of [...moves].reverse()) {
-            parent.remove(m.node);
-            m.oldParent.attachChild(m.node, m.oldIndex);
-            // 换线反向：移除新父连线，还原旧父连线
-            this.deps.model.edges = this.deps.model.edges.filter((e) => e !== m.newEdge);
-            this.deps.app.remove(m.newEdge);
-            this.deps.model.edges.push(m.oldEdge);
-            this.deps.app.add(m.oldEdge);
-            this.deps.model.applyNodeStyle(m.node, m.oldStyle);
-          }
-        },
-        // 序列化载荷：节点/父级/连线全部按 id 引用（同父多选时多条 move 共享
-        // newParentId；连线经会话注册表按 id 去重，换父前后的连线引用保持同一实例）
-        toJSON: () => ({
-          kind: "mindmap.move",
-          payload: {
-            moves: moves.map((m) => ({
-              nodeId: m.node.id,
-              oldParentId: m.oldParent.id,
-              oldIndex: m.oldIndex,
-              newParentId: parent.id,
-              newIndex: m.newIndex,
-              oldStyle: m.oldStyle,
-              newStyle: m.newStyle,
-              oldEdgeId: m.oldEdge.id,
-              newEdgeId: m.newEdge.id,
-            })),
-          },
-        }),
-      };
-      this.deps.history.exec(cmd);
+      // 移动命令（工厂统一形状）：多选目标合并为一条，undo 一次全回退（逆序插回，防同父索引失效）
+      this.deps.history.exec(makeMoveCommand(this.deps, moves));
     }
     await this.deps.onRelayout();
     if (parent) this.deps.emitChange("move");

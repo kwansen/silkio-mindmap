@@ -74,6 +74,9 @@ export interface MindMapOptions {
   // 或其 JSON 字符串。协议与提示词模板见 ai.ts（defaultAIEditPrompt）；
   // 未配置时 mindmap.ai.run 报"未配置适配器"
   ai?: AIEditGenerate;
+  // 初始化失败出口：init（建树/布局/挂载）为构造期异步流程，失败时经此通知宿主
+  //（缺省仅 console.error；未配置时宿主无法感知初始化失败）
+  onError?: (error: unknown) => void;
 }
 
 // 数据变化类型：新增节点 / 删除节点 / 拖拽换父 / 文本编辑结束 / 折叠切换 / 布局方向切换 / 连线样式切换 / AI 编辑
@@ -88,3 +91,8 @@ export type MindMapChangeType =
   | "ai";
 
 export type LayoutDirection = NonNullable<MindMapOptions["direction"]>;
+
+// 布局方向的共享状态引用：门面创建单一实例并按引用分发给模型与各交互控制器，
+// 各方运行时读取同一份值——方向切换只改这一处状态，各模块不再持有方向副本，
+// 也无需逐个调用 setDirection 同步
+export type LayoutDirectionRef = { value: LayoutDirection };

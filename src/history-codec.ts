@@ -13,15 +13,37 @@
 // 解码失败的命令返回 null：importJSON 收到 null 即整体放弃导入且不改动栈。
 import { compose } from "@silker/core";
 import type { App, EdgeShape, HistoryCommand, SerializedCommand, Text } from "@silker/core";
+import {
+  makeAddCommand,
+  makeDeleteCommand,
+  makeMoveCommand,
+  makePasteCommand,
+  makeRenderCommand,
+  makeTextCommand,
+} from "./commands";
 import type { MindEdge } from "./Edge";
 import type { MindTree } from "./model";
 import type { LayoutDirection, MindMapNode, Style } from "./types";
+import type {
+  AddPayload,
+  DeletePayload,
+  EdgePayload,
+  LayoutPayload,
+  MovePayload,
+  PastePayload,
+  RenderPayload,
+  RenderSidePayload,
+  TextPayload,
+} from "./history-payloads";
 
 export interface MindmapCodecDeps {
   model: MindTree;
   app: App;
   // 布局方向命令重建入口：恢复门面/模型/各控制器方向状态（MindMap.applyDirection）
   onDirection: (direction: LayoutDirection) => void;
+  // 挂载节点登记点击激活：编解码器重建的节点不经 app.add 包装，redo/undo 挂载时
+  // 经命令工厂的 bindNode 统一登记（见 commands.ts），漏登记即无法点击激活
+  bindNode: (node: Text) => void;
 }
 
 // 会话注册表：一次 importHistory 的引用解析上下文（codec 实例即会话，
@@ -31,65 +53,12 @@ interface MindmapImportSession {
   edges: Map<string, MindEdge>;
 }
 
-// 各 kind 的载荷形状（与 operations.ts / editing.ts / drag.ts / mindmap.ts 的 toJSON 一一对应）
-interface AddPayload {
-  parentId: string;
-  index: number;
-  edgeId: string;
-  node: MindMapNode;
-}
-interface PastePayload {
-  inserts: Array<{
-    parentId: string;
-    index: number;
-    node: MindMapNode;
-    edgeId: string;
-    innerEdgeIds: string[];
-  }>;
-}
-interface DeletePayload {
-  captures: Array<{ parentId: string; index: number; node: MindMapNode }>;
-  dead: Array<{ id: string; fromId: string; toId: string }>;
-}
-interface MovePayload {
-  moves: Array<{
-    nodeId: string;
-    oldParentId: string;
-    oldIndex: number;
-    newParentId: string;
-    newIndex: number;
-    oldStyle: Style;
-    newStyle: Style;
-    oldEdgeId: string;
-    newEdgeId: string;
-  }>;
-}
-interface TextPayload {
-  nodeId: string;
-  before: string;
-  after: string;
-}
-interface LayoutPayload {
-  before: LayoutDirection;
-  after: LayoutDirection;
-}
-interface EdgePayload {
-  before: EdgeShape;
-  after: EdgeShape;
-}
-// render（AI 整树替换）双侧载荷：整树定格快照 + collectEdges 深度先序配对的连线 id
-interface RenderSide {
-  root: MindMapNode;
-  edgeIds: string[];
-}
-interface RenderPayload {
-  before: RenderSide;
-  after: RenderSide;
-}
+// render（AI 整树替换）单侧载荷别名（形状即 history-payloads 的 RenderSidePayload）
+type RenderSide = RenderSidePayload;
 
 // 创建编解码器：decode 把 SerializedCommand 重建为 HistoryCommand（失败返回 null）
 export function createMindmapCodec(deps: MindmapCodecDeps) {
-  const { model, app } = deps;
+  const { model, app, bindNode } = deps;
   // 会话注册表：树上查不到的节点/连线对象在此登记，跨命令按 id 去重
   const nodes = new Map<string, Text>();
   const edges = new Map<string, MindEdge>();
@@ -97,8 +66,11 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
   // 节点解析：注册表 → 树上。注册表优先：render（AI 整树替换）会为与现存树
   // 相同的 id 登记全新的轨迹实例（前后树复用 id 表达不同实例），按解码轨迹
   // "后注册者胜出"才能让后续命令绑定到正确一侧的实例；无 render 的栈里
-  // 注册表只含树上查不到的 id（ensureNode 仅在树上缺失时登记），两序等价
-  function resolveNode(id: string): Text | null {
+  // 注册表只含树上查不到的 id（ensureNode 仅在树上缺失时登记），两序等价。
+  // 载荷 id 可空（与运行时 Text.id 对齐），null 视为解析失败返回 null，
+  // 由调用方整体放弃导入
+  function resolveNode(id: string | null | undefined): Text | null {
+    if (!id) return null;
     return nodes.get(id) ?? model.nodeById(id) ?? null;
   }
 
@@ -119,7 +91,13 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
   }
 
   // 连线解析：模型连线表 → 注册表；都没有则按端点重建并回写原 id
-  function resolveEdge(id: string, fromId: string, toId: string): MindEdge | null {
+  //（载荷 id 可空，null 视为解析失败返回 null，由调用方整体放弃导入）
+  function resolveEdge(
+    id: string | null | undefined,
+    fromId: string | null | undefined,
+    toId: string | null | undefined,
+  ): MindEdge | null {
+    if (!id) return null;
     const live = model.edges.find((e) => e.id === id);
     if (live) return live;
     const cached = edges.get(id);
@@ -175,21 +153,10 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
     if (!parent || !node) return null;
     const edge = resolveEdge(p.edgeId, p.parentId, node.id!);
     if (!edge) return null;
-    return {
-      type: "add",
-      redo: () => {
-        parent.attachChild(node, p.index);
-        app.add(edge);
-        model.edges.push(edge);
-      },
-      undo: () => {
-        parent.detachChild(node);
-        model.edges = model.edges.filter((e) => e !== edge);
-        app.remove(edge);
-      },
-      // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
-      toJSON: () => ({ kind: "mindmap.add", payload: p }),
-    };
+    // redo/undo 复用命令工厂；重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
+    const cmd = makeAddCommand({ app, model, bindNode }, { parent, node, index: p.index, edge });
+    cmd.toJSON = () => ({ kind: "mindmap.add", payload: p });
+    return cmd;
   }
 
   function decodePaste(p: PastePayload): HistoryCommand | null {
@@ -224,27 +191,10 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
       }
       inserts.push({ parent, node, edge, inner, index: ins.index });
     }
-    return {
-      type: "add",
-      redo: () => {
-        inserts.forEach(({ parent, node, edge, inner, index }) => {
-          parent.attachChild(node, index);
-          app.add(edge);
-          app.add(inner);
-          model.edges.push(edge, ...inner);
-        });
-      },
-      undo: () => {
-        for (let i = inserts.length - 1; i >= 0; i--) {
-          const { parent, node, edge, inner } = inserts[i];
-          parent.detachChild(node);
-          const removed = [edge, ...inner];
-          model.edges = model.edges.filter((e) => !removed.includes(e));
-          removed.forEach((e2) => app.remove(e2));
-        }
-      },
-      toJSON: () => ({ kind: "mindmap.paste", payload: p }),
-    };
+    // redo/undo 复用命令工厂；重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
+    const cmd = makePasteCommand({ app, model, bindNode }, inserts);
+    cmd.toJSON = () => ({ kind: "mindmap.paste", payload: p });
+    return cmd;
   }
 
   function decodeDelete(p: DeletePayload): HistoryCommand | null {
@@ -261,25 +211,11 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
       if (!edge) return null;
       dead.push(edge);
     }
-    return {
-      type: "delete",
-      redo: () => {
-        captures.forEach(({ node, parent }) => parent.remove(node));
-        model.edges = model.edges.filter((e) => !dead.includes(e));
-        dead.forEach((e) => app.remove(e));
-      },
-      undo: () => {
-        for (let i = captures.length - 1; i >= 0; i--) {
-          const { node, parent, index } = captures[i];
-          parent.attachChild(node, index);
-        }
-        dead.forEach((e) => {
-          model.edges.push(e);
-          app.add(e);
-        });
-      },
-      toJSON: () => ({ kind: "mindmap.delete", payload: p }),
-    };
+    // redo/undo 复用命令工厂（dead 显式传入：按载荷 id 解析的连线对象须跨
+    // redo/undo 共用同一实例，不做重算）；toJSON 透传原始载荷保持数据稳定
+    const cmd = makeDeleteCommand({ app, model, bindNode }, captures, dead);
+    cmd.toJSON = () => ({ kind: "mindmap.delete", payload: p });
+    return cmd;
   }
 
   function decodeMove(p: MovePayload): HistoryCommand | null {
@@ -314,47 +250,20 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
         newEdge,
       });
     }
-    return {
-      type: "move",
-      redo: () => {
-        for (const m of moves) {
-          m.oldParent.remove(m.node);
-          m.newParent.attachChild(m.node, m.newIndex);
-          model.edges = model.edges.filter((e) => e !== m.oldEdge);
-          app.remove(m.oldEdge);
-          model.edges.push(m.newEdge);
-          app.add(m.newEdge);
-          if (model.levelStyles.length) model.applyNodeStyle(m.node, m.newStyle);
-        }
-      },
-      undo: () => {
-        for (const m of [...moves].reverse()) {
-          m.newParent.remove(m.node);
-          m.oldParent.attachChild(m.node, m.oldIndex);
-          model.edges = model.edges.filter((e) => e !== m.newEdge);
-          app.remove(m.newEdge);
-          model.edges.push(m.oldEdge);
-          app.add(m.oldEdge);
-          model.applyNodeStyle(m.node, m.oldStyle);
-        }
-      },
-      toJSON: () => ({ kind: "mindmap.move", payload: p }),
-    };
+    // redo/undo 复用命令工厂（同连线对象时工厂跳过换线，净状态与逐条换接等价）；
+    // toJSON 透传原始载荷：导入后再导出保持数据稳定
+    const cmd = makeMoveCommand({ app, model, bindNode }, moves);
+    cmd.toJSON = () => ({ kind: "mindmap.move", payload: p });
+    return cmd;
   }
 
   function decodeText(p: TextPayload): HistoryCommand | null {
     const node = resolveNode(p.nodeId);
     if (!node) return null;
-    return {
-      type: "text",
-      redo: () => {
-        node.text = p.after;
-      },
-      undo: () => {
-        node.text = p.before;
-      },
-      toJSON: () => ({ kind: "mindmap.text", payload: p }),
-    };
+    // redo/undo 复用命令工厂；toJSON 透传原始载荷：导入后再导出保持数据稳定
+    const cmd = makeTextCommand(node, p.before, p.after);
+    cmd.toJSON = () => ({ kind: "mindmap.text", payload: p });
+    return cmd;
   }
 
   // 布局方向命令：纯方向快照，无对象引用，恢复门面方向状态后由 undo/redo 流程统一重布局。
@@ -372,14 +281,12 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
   }
 
   // 连线样式命令：按当前连线表重建为载荷样式（setEdgeStyle 继承纵向标志/可见性并
-  // 沿用原连线 id，跨命令按 id 解析的引用保持一致）；场景同步增删。样式未变化时
-  // setEdgeStyle 返回 null 直接跳过（正常导入纪律下 undo/redo 交替执行不会命中）
+  // 沿用原连线 id，跨命令按 id 解析的引用保持一致）；场景换入换出经 replaceEdges
+  // 原语统一收口（见 model.ts）。样式未变化时 setEdgeStyle 返回 null 直接跳过
+  //（正常导入纪律下 undo/redo 交替执行不会命中）
   function decodeEdge(p: EdgePayload): HistoryCommand {
     const apply = (shape: EdgeShape) => {
-      const old = [...model.edges];
-      if (model.setEdgeStyle(shape) === null) return;
-      app.remove(old);
-      app.add(model.edges);
+      model.setEdgeStyle(shape);
     };
     return {
       type: "edge",
@@ -432,31 +339,10 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
     const before = decodeRenderSide(p.before, false);
     const after = decodeRenderSide(p.after, true);
     if (!before || !after) return null;
-    return {
-      type: "ai",
-      redo: () => {
-        const prevRoot = model.root!;
-        const prevEdges = [...model.edges];
-        app.remove(prevRoot);
-        app.remove(prevEdges);
-        model.root = after.root;
-        model.edges = after.edges;
-        app.add(after.root);
-        app.add(after.edges);
-      },
-      undo: () => {
-        const prevRoot = model.root!;
-        const prevEdges = [...model.edges];
-        app.remove(prevRoot);
-        app.remove(prevEdges);
-        model.root = before.root;
-        model.edges = before.edges;
-        app.add(before.root);
-        app.add(before.edges);
-      },
-      // 重建命令的 toJSON 透传原始载荷：导入后再导出保持数据稳定
-      toJSON: () => ({ kind: "mindmap.render", payload: p }),
-    };
+    // redo/undo 复用命令工厂；toJSON 透传原始载荷：导入后再导出保持数据稳定
+    const cmd = makeRenderCommand({ app, model, bindNode }, before, after);
+    cmd.toJSON = () => ({ kind: "mindmap.render", payload: p });
+    return cmd;
   }
 
   return { decode };

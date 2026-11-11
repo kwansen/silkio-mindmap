@@ -8,13 +8,28 @@ import type {
 } from "@silker/core";
 import type {
   HistoryCapability,
-  TextEditorCapability,
   SelectionCapability,
 } from "@silker/core";
 import type { MindEdge } from "./Edge";
+import {
+  makeDeleteCommand,
+  makeMoveCommand,
+  makePasteCommand,
+  makeRenderCommand,
+  makeTextCommand,
+} from "./commands";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";
 import type { MindMapChangeType, MindMapNode } from "./types";
+import type {
+  AddPayload,
+  DeletePayload,
+  EdgePayload,
+  LayoutPayload,
+  MovePayload,
+  PastePayload,
+  TextPayload,
+} from "./history-payloads";
 
 // AI 编辑插件：AI 能力契约 + 控制器 + 能力注册插件。
 // 包内只定义"AI 编辑"的领域协议（操作 DSL / 上下文快照 / 应用管线），不绑定任何
@@ -169,7 +184,8 @@ export interface AIEditingDeps {
   // 清空选中态、重布局与宿主通知）：返回是否实际执行了一条命令
   undo: () => Promise<boolean>;
   redo: () => Promise<boolean>;
-  editor: Pick<TextEditorCapability, "bind">;
+  // 挂载节点登记点击激活（经命令 redo 的 bindNode 统一收口，见 commands.ts）
+  bindNode: (node: Text) => void;
   sel: Pick<SelectionCapability<Text>, "items">;
   activation: Pick<
     ActivationController,
@@ -366,25 +382,8 @@ export function parseAIResponse(
 }
 
 // ---- 历史描述（history 操作的读取实现，纯函数，导出便于测试）----
-
-// 各 kind 命令的载荷形状（与 history-codec.ts 的对应接口一致，仅取描述所需字段）
-interface HistoryPastePayload {
-  inserts: Array<{ parentId: string; node: MindMapNode }>;
-}
-interface HistoryDeletePayload {
-  captures: Array<{ node: MindMapNode }>;
-}
-interface HistoryMovePayload {
-  moves: Array<{
-    nodeId: string;
-    oldParentId: string;
-    newParentId: string;
-  }>;
-}
-interface HistoryTextPayload {
-  before: string;
-  after: string;
-}
+// 各 kind 命令的载荷形状统一取自 history-payloads.ts（与 commands.ts 生产端、
+// history-codec.ts 消费端共享同一类型源）
 
 // 把单条序列化命令转为可读描述："将「前端」改为「前端开发」"。
 // 节点文本按 id 经模型解析（已删/已换树节点的文本从载荷内嵌数据读取）；
@@ -393,8 +392,9 @@ export function describeHistoryCommand(
   s: SerializedCommand,
   model: Pick<MindTree, "nodeById">,
 ): string {
-  const nodeText = (id: string): string =>
-    model.nodeById(id)?.text ?? "（已不存在的节点）";
+  // 载荷 id 可空（与运行时 Text.id 对齐），null 视为"已不存在的节点"
+  const nodeText = (id: string | null | undefined): string =>
+    (id ? model.nodeById(id)?.text : null) ?? "（已不存在的节点）";
   if (s.kind === "composite") {
     const p = s.payload as { children?: SerializedCommand[] } | null;
     const children = (p?.children ?? [])
@@ -404,15 +404,15 @@ export function describeHistoryCommand(
   }
   switch (s.kind) {
     case "mindmap.text": {
-      const p = s.payload as HistoryTextPayload;
+      const p = s.payload as TextPayload;
       return `将「${p.before}」改为「${p.after}」`;
     }
     case "mindmap.add": {
-      const p = s.payload as { parentId: string; node: MindMapNode };
+      const p = s.payload as AddPayload;
       return `在「${nodeText(p.parentId)}」下添加「${p.node.text}」`;
     }
     case "mindmap.paste": {
-      const p = s.payload as HistoryPastePayload;
+      const p = s.payload as PastePayload;
       const first = p.inserts[0];
       if (!first) return "粘贴节点";
       const more =
@@ -420,14 +420,14 @@ export function describeHistoryCommand(
       return `在「${nodeText(first.parentId)}」下粘贴「${first.node.text}」${more}`;
     }
     case "mindmap.delete": {
-      const p = s.payload as HistoryDeletePayload;
+      const p = s.payload as DeletePayload;
       const first = p.captures[0];
       if (!first) return "删除节点";
       const more = p.captures.length > 1 ? ` 等 ${p.captures.length} 处` : "";
       return `删除「${first.node.text}」${more}`;
     }
     case "mindmap.move": {
-      const p = s.payload as HistoryMovePayload;
+      const p = s.payload as MovePayload;
       const m = p.moves[0];
       if (!m) return "移动节点";
       if (m.oldParentId === m.newParentId)
@@ -435,11 +435,11 @@ export function describeHistoryCommand(
       return `将「${nodeText(m.nodeId)}」移动到「${nodeText(m.newParentId)}」下`;
     }
     case "mindmap.layout": {
-      const p = s.payload as { after: string };
+      const p = s.payload as LayoutPayload;
       return `调整布局方向为「${p.after}」`;
     }
     case "mindmap.edge": {
-      const p = s.payload as { after: string };
+      const p = s.payload as EdgePayload;
       return `调整连线样式为「${p.after}」`;
     }
     case "mindmap.render":
@@ -610,8 +610,6 @@ export class AIEditingController {
     // 清空选中态：AI 可能删除选中节点，先摘除悬空的覆盖层引用
     this.deps.activation.deactivate();
     this.deps.history.exec(compose("ai", ...commands));
-    // 新建节点补挂点击激活绑定（splice 挂载不经 app.add 包装，同 paste 纪律）
-    created.forEach((n) => this.deps.editor.bind(n));
     await this.deps.onRelayout();
     // 最后落点进入激活态，便于继续手动编辑（render 整树替换激活新根，
     // 避免激活到深层叶子；无新建则保持退出态）
@@ -641,7 +639,7 @@ export class AIEditingController {
     // history 操作读取的历史描述（无 history 操作时为 null），并入 run 的 answer
     historyText: string | null;
   } {
-    const { model, app } = this.deps;
+    const { model, app, bindNode } = this.deps;
     const root = model.root!;
     // 批内会话注册表：新建节点 id → 运行时节点（redo 前不在树上，nodeById 查不到）
     const session = new Map<string, Text>();
@@ -760,11 +758,8 @@ export class AIEditingController {
       }
       if (op.op === "add") {
         const parent = ensureTarget(op.target, no);
-        // 目标折叠时先展开（同 createRelated/paste 纪律：展开不入命令），避免新建子树被可见性联动隐藏
-        if (parent.collapsed) {
-          parent.collapsed = false;
-          model.applyCollapseVisibility();
-        }
+        // 目标折叠时先展开（expand 原语统一收口，展开不入命令），避免新建子树被可见性联动隐藏
+        model.expand(parent);
         const depth = model.depthOf(parent) + 1;
         const index = Math.max(
           0,
@@ -782,40 +777,7 @@ export class AIEditingController {
         });
         // 复用 paste 命令形状（kind: mindmap.paste）：多插入点 + 内嵌子树 +
         // 连线按 id 引用，编解码器无需感知 AI 来源
-        commands.push({
-          type: "add",
-          redo: () => {
-            inserts.forEach(({ parent: p, node, edge, inner, index: idx }) => {
-              p.attachChild(node, idx);
-              this.deps.app.add(edge);
-              this.deps.app.add(inner);
-              model.edges.push(edge, ...inner);
-            });
-          },
-          undo: () => {
-            for (let i = inserts.length - 1; i >= 0; i--) {
-              const { parent: p, node, edge, inner } = inserts[i];
-              p.detachChild(node);
-              const removed = [edge, ...inner];
-              model.edges = model.edges.filter((e) => !removed.includes(e));
-              removed.forEach((e2) => app.remove(e2));
-            }
-          },
-          toJSON: () => ({
-            kind: "mindmap.paste",
-            payload: {
-              inserts: inserts.map(
-                ({ parent: p, node, edge, inner, index: idx }) => ({
-                  parentId: p.id,
-                  index: idx,
-                  node: model.serializeForHistory(node),
-                  edgeId: edge.id,
-                  innerEdgeIds: inner.map((e) => e.id),
-                }),
-              ),
-            },
-          }),
-        });
+        commands.push(makePasteCommand({ app, model, bindNode }, inserts));
         steps.push({
           op,
           label: `在「${parent.text}」下添加 ${op.nodes.length} 个节点`,
@@ -871,61 +833,29 @@ export class AIEditingController {
           ...model.levelStyle(model.depthOf(newParent) + 1),
           ...model.customStyles.get(node),
         };
-        // 目标折叠时先展开（同 add 纪律），避免移入的子树被可见性联动隐藏
-        if (newParent.collapsed && newParent !== oldParent) {
-          newParent.collapsed = false;
-          model.applyCollapseVisibility();
-        }
-        const np = newParent;
-        commands.push({
-          type: "move",
-          redo: () => {
-            oldParent.remove(node);
-            np.attachChild(node, newIndex);
-            if (newEdge !== oldEdge) {
-              model.edges = model.edges.filter((e) => e !== oldEdge);
-              app.remove(oldEdge);
-              model.edges.push(newEdge);
-              app.add(newEdge);
-            }
-            if (model.levelStyles.length) model.applyNodeStyle(node, newStyle);
-          },
-          undo: () => {
-            np.remove(node);
-            oldParent.attachChild(node, oldIndex);
-            if (newEdge !== oldEdge) {
-              model.edges = model.edges.filter((e) => e !== newEdge);
-              app.remove(newEdge);
-              model.edges.push(oldEdge);
-              app.add(oldEdge);
-            }
-            model.applyNodeStyle(node, oldStyle);
-          },
-          toJSON: () => ({
-            kind: "mindmap.move",
-            payload: {
-              moves: [
-                {
-                  nodeId: node.id,
-                  oldParentId: oldParent.id,
-                  oldIndex,
-                  newParentId: np.id,
-                  newIndex,
-                  oldStyle,
-                  newStyle,
-                  oldEdgeId: oldEdge.id,
-                  newEdgeId: newEdge.id,
-                },
-              ],
+        // 目标折叠时先展开（expand 原语，同 add 纪律），避免移入的子树被可见性联动隐藏
+        if (newParent !== oldParent) model.expand(newParent);
+        commands.push(
+          makeMoveCommand({ app, model, bindNode }, [
+            {
+              node,
+              oldParent,
+              oldIndex,
+              newParent,
+              newIndex,
+              oldStyle,
+              newStyle,
+              oldEdge,
+              newEdge,
             },
-          }),
-        });
+          ]),
+        );
         steps.push({
           op,
           label:
             oldParent === newParent
               ? `将「${node.text}」移动到第 ${newIndex + 1} 位`
-              : `将「${node.text}」移动到「${np.text}」下`,
+              : `将「${node.text}」移动到「${newParent.text}」下`,
           status: "applied",
           target: targetOf(node),
         });
@@ -948,19 +878,7 @@ export class AIEditingController {
           continue;
         }
         // 复用文本命令形状（kind: mindmap.text）
-        commands.push({
-          type: "text",
-          redo: () => {
-            node.text = after;
-          },
-          undo: () => {
-            node.text = before;
-          },
-          toJSON: () => ({
-            kind: "mindmap.text",
-            payload: { nodeId: node.id, before, after },
-          }),
-        });
+        commands.push(makeTextCommand(node, before, after));
         steps.push({
           op,
           label: `将「${before}」改为「${after}」`,
@@ -1011,42 +929,13 @@ export class AIEditingController {
           n.children.forEach((c) => count(c as Text));
         };
         count(newRoot);
-        commands.push({
-          type: "ai",
-          redo: () => {
-            const prevRoot = model.root!;
-            const prevEdges = [...model.edges];
-            app.remove(prevRoot);
-            app.remove(prevEdges);
-            model.root = newRoot;
-            model.edges = newEdges;
-            app.add(newRoot);
-            app.add(newEdges);
-          },
-          undo: () => {
-            app.remove(newRoot);
-            app.remove(newEdges);
-            model.root = root;
-            model.edges = oldEdges;
-            app.add(root);
-            app.add(oldEdges);
-          },
-          // 序列化：双侧整树定格快照 + collectEdges 深度先序配对的连线 id，
-          // 解码侧据此整树重建并按 id 回写连线，跨命令按 id 解析的引用保持一致
-          toJSON: () => ({
-            kind: "mindmap.render",
-            payload: {
-              before: {
-                root: model.serializeForHistory(root),
-                edgeIds: oldEdges.map((e) => e.id),
-              },
-              after: {
-                root: model.serializeForHistory(newRoot),
-                edgeIds: newEdges.map((e) => e.id),
-              },
-            },
-          }),
-        });
+        commands.push(
+          makeRenderCommand(
+            { app, model, bindNode },
+            { root, edges: oldEdges },
+            { root: newRoot, edges: newEdges },
+          ),
+        );
         steps.push({
           op,
           label: `用新数据重渲染整棵导图（${nodeCount} 个节点）`,
@@ -1095,48 +984,11 @@ export class AIEditingController {
         (n as Text).children.forEach(collect);
       };
       collect(node);
-      let dead: MindEdge[] = [];
-      commands.push({
-        type: "delete",
-        redo: () => {
-          const liveSubtree = new Set<object>();
-          const collectLive = (n: object) => {
-            liveSubtree.add(n);
-            (n as Text).children.forEach(collectLive);
-          };
-          collectLive(node);
-          dead = model.edges.filter(
-            (e) => liveSubtree.has(e.fromNode) || liveSubtree.has(e.toNode),
-          );
-          parent.remove(node);
-          model.edges = model.edges.filter((e) => !dead.includes(e));
-          dead.forEach((e) => app.remove(e));
-        },
-        undo: () => {
-          parent.attachChild(node, index);
-          dead.forEach((e) => {
-            model.edges.push(e);
-            app.add(e);
-          });
-        },
-        toJSON: () => ({
-          kind: "mindmap.delete",
-          payload: {
-            captures: [
-              {
-                parentId: parent.id,
-                index,
-                node: model.serializeForHistory(node),
-              },
-            ],
-            dead: dead.map((e) => ({
-              id: e.id,
-              fromId: e.fromNode.id,
-              toId: e.toNode.id,
-            })),
-          },
-        }),
-      });
+      // 死连线由工厂在 redo 首帧按当时树状态定格（编译期树未变，批内前序 move
+      // 尚未执行，届时收集才准确；届时批内连线均已入 model.edges）
+      commands.push(
+        makeDeleteCommand({ app, model, bindNode }, [{ node, parent, index }]),
+      );
       steps.push({
         op,
         label:

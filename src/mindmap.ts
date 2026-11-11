@@ -27,8 +27,10 @@ import { NodeOperations } from "./operations";
 import { AIEditingController, AIEditingPlugin } from "./ai";
 import { KeyboardNav } from "./keyboard";
 import { DragInteractions } from "./drag";
+import type { EdgePayload, LayoutPayload } from "./history-payloads";
 import type {
   LayoutDirection,
+  LayoutDirectionRef,
   MindMapChangeType,
   MindMapNode,
   MindMapOptions,
@@ -44,7 +46,9 @@ export class MindMap {
   private pan: ViewportCapability | null;
   // 文本编辑能力（TextEditor 插件 install 时注册）：按能力接口消费，不依赖具体插件实例
   private editor: TextEditorCapability;
-  private direction: LayoutDirection;
+  // 布局方向共享引用（唯一状态源）：模型与各交互控制器按引用读取同一份值，
+  // 切换方向只改这一处状态，无需逐模块 setDirection 同步
+  private dir: LayoutDirectionRef;
   // 激活高亮环
   private highlight: ActiveHighlight;
   // 拖拽换父：原位虚影框 + 跟随鼠标合集矩形 + 落点连线（可放置提示）
@@ -90,9 +94,12 @@ export class MindMap {
   // 异步初始化 promise：构造函数无法 await，宿主可在 ready 落定后安全操作场景
   // （如 selectRoot 选中根节点）
   private ready: Promise<void>;
+  // 已登记点击激活的节点（WeakSet 去重）：bindNode 为命令 redo 挂载路径的统一
+  // 登记入口（见 commands.ts），重复挂载/换树重放不重复登记
+  private boundNodes = new WeakSet<Text>();
 
   constructor(options: MindMapOptions) {
-    this.direction = options.direction ?? "left";
+    this.dir = { value: options.direction ?? "left" };
     const edgeStyle = options.edgeStyle ?? "bezier";
     const levelStyles = options.levelStyles ?? [];
     this.onChange = options.onChange;
@@ -124,10 +131,6 @@ export class MindMap {
       title: "复制选中",
       run: () => {
         const entry = this.operations.copySelection();
-        console.log(
-          "[clipdbg] mindmap.copy command: entry=", entry?.kind ?? null,
-          "clipboard=", this.clipboard ? "ok" : "NULL",
-        );
         if (entry) void this.clipboard?.write(entry);
       },
     });
@@ -203,14 +206,20 @@ export class MindMap {
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换，
     // 纵向布局（down）落点连线走垂直方向
     this.ghost = new DragGhost();
-    this.ghost.mirror = this.direction === "left";
-    this.ghost.vertical = this.direction === "down";
+    this.ghost.mirror = this.dir.value === "left";
+    this.ghost.vertical = this.dir.value === "down";
     // 折叠开关覆盖层（绘制在拖拽反馈层之上、框选矩形之下），开关项渲染时实时枚举
     this.collapseToggle = new CollapseToggle();
     this.collapseToggle.items = () => this.collapse.items();
 
     // ---- 场景模块装配（插件之后、初始数据 init 之前；highlight/ghost/collapseToggle 注入各 controller）----
-    this.model = new MindTree({ levelStyles, edgeStyle, direction: this.direction });
+    // 模型接入场景增删入口（连线表同步原语据此联动场景连线层）与方向共享引用
+    this.model = new MindTree({
+      levelStyles,
+      edgeStyle,
+      direction: this.dir,
+      app: this.app,
+    });
     // 拖拽落点连线镜像按目标节点子侧判定（双向布局下左右两侧各自互换，
     // 单侧布局兜底 mirror 与 model.sideOf 结果一致）
     this.ghost.sideOf = (n) => this.model.sideOf(n) === "left";
@@ -228,7 +237,7 @@ export class MindMap {
     });
     this.collapse = new CollapseController({
       model: this.model,
-      direction: this.direction,
+      direction: this.dir,
       sel: this.sel,
       isBusy: () => this.drag.dragState !== null || this.sel.marqueeActive,
       requestRender: () => this.app.requestOverlayRender(),
@@ -240,7 +249,8 @@ export class MindMap {
       app: this.app,
       model: this.model,
       history: this.history,
-      editor: this.editor,
+      // 挂载节点登记点击激活（命令 redo 统一收口，见 bindNode 方法）
+      bindNode: (n) => this.bindNode(n),
       sel: this.sel,
       activation: this.activation,
       onRelayout: () => this.relayout(),
@@ -249,7 +259,6 @@ export class MindMap {
     // 剪贴板接线：场景以 consumer 身份注册到 Clipboard 插件（原生 copy/paste 事件
     // 分发；未装配插件时 clipboard 为 null，复制/粘贴命令降级为无操作）
     this.clipboard = this.app.capability(CLIPBOARD_CAPABILITY) ?? null;
-    console.log("[clipdbg] MindMap clipboard capability:", this.clipboard ? "found" : "NULL");
     if (this.clipboard) {
       const unregister = this.clipboard.register({
         kind: "mindmap",
@@ -265,7 +274,7 @@ export class MindMap {
     this.keyboard = new KeyboardNav({
       model: this.model,
       sel: this.sel,
-      direction: this.direction,
+      direction: this.dir,
       activation: this.activation,
       collapse: this.collapse,
       operations: this.operations,
@@ -281,7 +290,7 @@ export class MindMap {
       collapse: this.collapse,
       activation: this.activation,
       keyboard: this.keyboard,
-      direction: this.direction,
+      direction: this.dir,
       onRelayout: () => this.relayout(),
       emitChange: (type) => this.emitChange(type),
     });
@@ -299,7 +308,8 @@ export class MindMap {
         // 清选中、重布局与宿主通知），返回是否实际执行供步骤反馈区分跳过
         undo: () => this.undo(),
         redo: () => this.redo(),
-        editor: this.editor,
+        // 挂载节点登记点击激活（命令 redo 统一收口，见 bindNode 方法）
+        bindNode: (n) => this.bindNode(n),
         sel: this.sel,
         activation: this.activation,
         onRelayout: () => this.relayout(),
@@ -313,8 +323,13 @@ export class MindMap {
     // 点击画布空白处取消激活态（拖拽平移不触发）：按能力键注册空白点击回调
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(() => this.activation.deactivate());
     // 异步初始化：先布局再挂载渲染（构造函数无法 await，内部顺序保证）；
-    // promise 留档供 selectRoot 等宿主调用等待就绪
-    this.ready = this.init(options.data);
+    // promise 留档供 selectRoot 等宿主调用等待就绪。初始化失败（数据/布局异常）
+    // 经 onError 通知宿主并兜底 console.error，避免静默的 unhandled rejection
+    //（ready 保持 resolved，selectRoot 等后续调用安全跳过）
+    this.ready = this.init(options.data).catch((err) => {
+      console.error("[MindMap] 初始化失败", err);
+      options.onError?.(err);
+    });
   }
 
   // 全选：全部可见节点进入多选态（高亮环 + 批量拖拽/删除/复制可用）。
@@ -391,7 +406,7 @@ export class MindMap {
   // 恢复方向状态，重布局由 undo/redo 流程统一执行
   async setLayout(direction: LayoutDirection) {
     if (!this.model.root || !this.pan) return;
-    const before = this.direction;
+    const before = this.dir.value;
     if (before === direction) return;
     this.applyDirection(direction);
     await this.relayout();
@@ -400,7 +415,7 @@ export class MindMap {
       redo: () => this.applyDirection(direction),
       undo: () => this.applyDirection(before),
       // 序列化载荷：纯方向快照，重建时经 onDirection 回调恢复门面方向状态
-      toJSON: () => ({
+      toJSON: (): { kind: "mindmap.layout"; payload: LayoutPayload } => ({
         kind: "mindmap.layout",
         payload: { before, after: direction },
       }),
@@ -408,49 +423,40 @@ export class MindMap {
     this.emitChange("layout");
   }
 
-  // 应用布局方向到门面/模型/各控制器（数据与场景实例不动）：翻转既有连线纵向标志，
-  // 重布局由调用方统一执行（setLayout 与历史 undo/redo 共用，undo/redo 后
-  // MindMap.undo/redo 的 relayout 按 this.direction 重排）
+  // 应用布局方向到门面/模型/各控制器（数据与场景实例不动）：方向为共享引用唯一状态源，
+  // 改 ref.value 即全员生效；模型侧只翻转既有连线纵向标志。重布局由调用方统一执行
+  //（setLayout 与历史 undo/redo 共用，undo/redo 后 MindMap.undo/redo 的 relayout
+  // 按共享 ref 重排）
   private applyDirection(direction: LayoutDirection) {
-    this.direction = direction;
-    this.model.setDirection(direction);
+    this.dir.value = direction;
+    this.model.applyDirection(direction);
     this.ghost.mirror = direction === "left";
     this.ghost.vertical = direction === "down";
-    this.collapse.setDirection(direction);
-    this.keyboard.setDirection(direction);
-    this.drag.setDirection(direction);
   }
 
-  // 设置连线样式（数据与场景实例保持不动）：按新样式重建连线对象并替换场景中的连线层。
+  // 设置连线样式（数据与场景实例保持不动）：按新样式重建连线对象，场景换入换出
+  // 经 replaceEdges 原语统一收口（模型连线表与场景连线层同一处维护，见 model.ts）。
   // 锚点在渲染前刷新（update），无需重布局，仅请求重绘；样式未变化时无操作。
   // 设置记入历史（变更已发生故 record 而非 exec）：undo/redo 直接换回重建前的
-  // 旧连线对象数组（对象引用稳定，无需再走重建），场景同步增删
+  // 旧连线对象数组（对象引用稳定，无需再走重建），场景同步同样走原语
   setEdgeStyle(shape: EdgeShape) {
     if (!this.model.root) return;
     const prev = [...this.model.edges];
     const before = this.model.setEdgeStyle(shape);
     if (before === null) return;
     const next = [...this.model.edges];
-    this.app.remove(prev);
-    this.app.add(next);
     this.app.requestRender();
     this.history.record({
       type: "edge",
       redo: () => {
-        this.model.edges.length = 0;
-        this.model.edges.push(...next);
-        this.app.remove(prev);
-        this.app.add(next);
+        this.model.replaceEdges(next);
       },
       undo: () => {
-        this.model.edges.length = 0;
-        this.model.edges.push(...prev);
-        this.app.remove(next);
-        this.app.add(prev);
+        this.model.replaceEdges(prev);
       },
       // 序列化载荷：纯样式快照，重建时经 model.setEdgeStyle 按当前连线表重建
       //（重建沿用原连线 id，跨命令按 id 解析的引用保持一致）
-      toJSON: () => ({
+      toJSON: (): { kind: "mindmap.edge"; payload: EdgePayload } => ({
         kind: "mindmap.edge",
         payload: { before, after: shape },
       }),
@@ -473,8 +479,18 @@ export class MindMap {
       app: this.app,
       // 布局方向命令重建：恢复门面/模型/各控制器方向状态（重布局由 undo/redo 流程统一执行）
       onDirection: (d) => this.applyDirection(d),
+      // 编解码器重建节点经命令 redo 的 bindNode 统一登记点击激活（WeakSet 去重）
+      bindNode: (n) => this.bindNode(n),
     });
     return this.history.importJSON?.(data, (s) => codec.decode(s)) ?? false;
+  }
+
+  // 挂载节点登记点击激活（幂等）：命令 redo 挂载路径与编解码器重建路径的统一入口，
+  // 生产方不再各自手工 editor.bind（WeakSet 去重，重复挂载/换树重放不重复登记）
+  private bindNode(n: Text) {
+    if (this.boundNodes.has(n)) return;
+    this.boundNodes.add(n);
+    this.editor.bind(n);
   }
 
   // 导出整棵树为图片（返回 Blob）：委托导出能力离屏渲染，与当前视口无关；
@@ -495,7 +511,7 @@ export class MindMap {
     // 数据可携带折叠态：布局前先按折叠标志联动可见性（布局器跳过折叠子树）
     this.model.applyCollapseVisibility();
     await this.layout.layout(root, {
-      direction: this.direction,
+      direction: this.dir.value,
       levelGap: 48,
       siblingGap: 12,
     });
@@ -521,7 +537,7 @@ export class MindMap {
     // 折叠可见性联动（undo/redo 换父、拖入折叠节点等路径统一收口于此）
     this.model.applyCollapseVisibility();
     await this.layout.layout(this.model.root, {
-      direction: this.direction,
+      direction: this.dir.value,
       levelGap: 48,
       siblingGap: 12,
     });

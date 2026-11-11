@@ -2,12 +2,13 @@ import type { Node, Text } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import { TOGGLE_RADIUS, TOGGLE_GAP } from "./CollapseToggle";
 import type { MindTree } from "./model";
-import type { MindMapChangeType, LayoutDirection } from "./types";
+import type { MindMapChangeType, LayoutDirectionRef } from "./types";
 
 export interface CollapseDeps {
   // 模型（树根的只读消费方 + 节点子侧判定，both 布局下交互按节点侧别镜像）
   model: Pick<MindTree, "root" | "sideOf">;
-  direction: LayoutDirection;
+  // 布局方向共享引用（门面分发，切换方向只改 ref.value，无需逐模块同步）
+  direction: LayoutDirectionRef;
   // 选中能力（切换折叠后判断选中态是否指向被隐藏节点）
   sel: Pick<SelectionCapability<Text>, "items">;
   // 拖拽或框选进行中（busy 时隐藏全部展开态开关）
@@ -26,11 +27,6 @@ export class CollapseController {
   hoverToggles = new Set<Text>();
 
   constructor(private deps: CollapseDeps) {}
-
-  // 切换布局方向：开关位置与悬浮区域按新方向动态计算（togglePoints/toggleHoverRect 运行时读取）
-  setDirection(direction: LayoutDirection) {
-    this.deps.direction = direction;
-  }
 
   // 枚举当前应显示的折叠开关（有子节点且可见的节点），开关圆心在节点子侧边缘外
   // （横向布局在左/右缘，纵向布局在底缘）。折叠态（+）常显；展开态（−）仅鼠标悬浮
@@ -103,12 +99,12 @@ export class CollapseController {
   // 双向布局根节点两侧各一枚）
   private togglePoints(n: Text): { x: number; y: number }[] {
     const p = n.getWorldPoint();
-    if (this.deps.direction === "down") {
+    if (this.deps.direction.value === "down") {
       return [{ x: p.x + n.width / 2, y: p.y + n.height + TOGGLE_GAP }];
     }
     const right = { x: p.x + n.width + TOGGLE_GAP, y: p.y + n.height / 2 };
     const left = { x: p.x - TOGGLE_GAP, y: p.y + n.height / 2 };
-    if (this.deps.direction === "both" && n === this.deps.model.root) {
+    if (this.deps.direction.value === "both" && n === this.deps.model.root) {
       return [right, left];
     }
     return [this.deps.model.sideOf(n) === "right" ? right : left];
@@ -120,7 +116,7 @@ export class CollapseController {
   // 仅连线区域触发；无可见子节点返回 null（无连线即无区域）。
   // 双向布局根节点的连线分布在左右两侧，覆盖矩形取两侧连线的并集（此时必然覆盖本体区段）
   private toggleHoverRect(n: Text) {
-    const vertical = this.deps.direction === "down";
+    const vertical = this.deps.direction.value === "down";
     const p = n.getWorldPoint();
     if (vertical) {
       // 起点为节点底缘（悬浮节点本体不算），横向含父锚 x（连线由此引出）

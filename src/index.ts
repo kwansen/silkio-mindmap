@@ -5,6 +5,7 @@ export type {
   MindMapNode,
   MindMapOptions,
   LayoutDirection,
+  LayoutDirectionRef,
   MindMapChangeType,
 } from "./types"
 // 自动布局：契约 + 官方树形布局插件（第三方布局插件按能力键同名覆盖）

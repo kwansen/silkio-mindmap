@@ -1,8 +1,8 @@
 import type { App, Node, Text } from "@silker/core";
-import type { HistoryCapability, HistoryCommand } from "@silker/core";
+import type { HistoryCapability } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
-import type { TextEditorCapability } from "@silker/core";
 import type { ClipboardEntry } from "@silker/core";
+import { makeAddCommand, makeDeleteCommand, makePasteCommand } from "./commands";
 import type { MindEdge } from "./Edge";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";
@@ -12,9 +12,10 @@ export interface NodeOperationsDeps {
   app: App;
   model: MindTree;
   history: Pick<HistoryCapability, "exec">;
-  editor: Pick<TextEditorCapability, "bind">;
   sel: Pick<SelectionCapability<Text>, "items" | "has">;
   activation: Pick<ActivationController, "active" | "activate" | "deactivate">;
+  // 挂载节点登记点击激活（经命令 redo 的 bindNode 统一收口，见 commands.ts）
+  bindNode: (node: Text) => void;
   onRelayout: () => Promise<void> | void;
   emitChange: (type: MindMapChangeType) => void;
 }
@@ -27,16 +28,12 @@ export class NodeOperations {
   // Tab 创建子节点、Enter 在当前节点下方创建兄弟节点，随后进入编辑并重布局
   // （编辑态由 bindNodeKeys 调用，激活态由 onGlobalKeydown 以合成事件调用）
   async createRelated(e: KeyboardEvent, text: Text) {
-    console.log("[MindMap] createRelated", e.key, "from:", text.text);
     const isChild = e.key === "Tab";
     // 根节点回车（无父级可建兄弟节点）忽略，不创建任何节点
     if (!isChild && !text.parent) return;
     const parent = isChild ? text : ((text.parent as Text | null) ?? text);
     // 目标父级处于折叠态时先展开，避免新建节点被可见性联动隐藏
-    if (parent.collapsed) {
-      parent.collapsed = false;
-      this.deps.model.applyCollapseVisibility();
-    }
+    this.deps.model.expand(parent);
     // 新节点按级数取样式：Tab 建子节点深度 +1，Enter 建兄弟节点深度不变
     const style = this.deps.model.newNodeStyle(
       text,
@@ -50,34 +47,11 @@ export class NodeOperations {
     const node = this.deps.model.createNode(text, style);
     this.deps.model.nodeStyles.set(node, style);
     const edge = this.deps.model.createEdge(parent, node);
-    // 新增节点命令：redo/undo 对称地增删子节点与连线（结构重放走静默原语，
-    // 不产生中间事件，变更由命令后的 emitChange 统一补发）
-    const cmd: HistoryCommand = {
-      type: "add",
-      redo: () => {
-        parent.attachChild(node, index);
-        this.deps.app.add(edge);
-        this.deps.model.edges.push(edge);
-      },
-      undo: () => {
-        parent.detachChild(node);
-        this.deps.model.edges = this.deps.model.edges.filter((edge2) => edge2 !== edge);
-        this.deps.app.remove(edge);
-      },
-      // 序列化载荷：node 定格完整子树数据（含生效样式与 id），父级与连线按 id 引用，
-      // 导入端经编解码器按 id 重建/解析引用后重放同一挂载/摘除语义
-      toJSON: () => ({
-        kind: "mindmap.add",
-        payload: {
-          parentId: parent.id,
-          index,
-          edgeId: edge.id,
-          node: this.deps.model.serializeForHistory(node),
-        },
-      }),
-    };
-    this.deps.history.exec(cmd);
-    this.deps.editor.bind(node);
+    // 新增节点命令：redo/undo 对称地增删子节点与连线（工厂统一形状，序列化载荷
+    // node 定格完整子树数据、父级与连线按 id 引用）
+    this.deps.history.exec(
+      makeAddCommand(this.deps, { parent, node, index, edge }),
+    );
     await this.deps.onRelayout();
     // 新节点进入激活态（常驻覆盖层，打字即编辑）
     this.deps.activation.activate(node);
@@ -107,44 +81,9 @@ export class NodeOperations {
     const dead = this.deps.model.edges.filter(
       (e) => subtree.has(e.fromNode) || subtree.has(e.toNode),
     );
-    // 删除命令：多选目标合并为一条，undo 一次全回退
-    const cmd: HistoryCommand = {
-      type: "delete",
-      redo: () => {
-        captures.forEach(({ node, parent }) => parent.remove(node));
-        this.deps.model.edges = this.deps.model.edges.filter((e) => !dead.includes(e));
-        dead.forEach((e) => this.deps.app.remove(e));
-      },
-      undo: () => {
-        // 逆序插回：同父多目标按索引从大到小还原，前序插入不影响后序索引
-        for (let i = captures.length - 1; i >= 0; i--) {
-          const { node, parent, index } = captures[i];
-          parent.attachChild(node, index);
-        }
-        dead.forEach((e) => {
-          this.deps.model.edges.push(e);
-          this.deps.app.add(e);
-        });
-      },
-      // 序列化载荷：被删节点脱离树，须内嵌完整子树数据；待清理连线按 (from,to) 端点
-      // id 引用（mindmap 连线严格父→子一对一，端点二元组唯一标识一条边）
-      toJSON: () => ({
-        kind: "mindmap.delete",
-        payload: {
-          captures: captures.map(({ node, parent, index }) => ({
-            parentId: parent.id,
-            index,
-            node: this.deps.model.serializeForHistory(node),
-          })),
-          dead: dead.map((e) => ({
-            id: e.id,
-            fromId: e.fromNode.id,
-            toId: e.toNode.id,
-          })),
-        },
-      }),
-    };
-    this.deps.history.exec(cmd);
+    // 删除命令（工厂统一形状）：多选目标合并为一条，undo 一次全回退；
+    // 死连线在编译期定格（此刻树未变，与 redo 时计算等价）
+    this.deps.history.exec(makeDeleteCommand(this.deps, captures, dead));
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
     this.deps.activation.deactivate();
     await this.deps.onRelayout();
@@ -165,10 +104,7 @@ export class NodeOperations {
       : this.deps.activation.active
         ? [this.deps.activation.active]
         : [];
-    if (!items.length) {
-      console.log("[clipdbg] copySelection: no selection/active");
-      return null;
-    }
+    if (!items.length) return null;
     const roots = items.filter((n) => {
       let p = n.parent as Text | null;
       while (p) {
@@ -177,7 +113,6 @@ export class NodeOperations {
       }
       return true;
     });
-    console.log("[clipdbg] copySelection roots=", roots.map((n) => n.text));
     const payload = roots.map((n) => this.deps.model.serializeNode(n));
     return {
       kind: "mindmap",
@@ -192,21 +127,23 @@ export class NodeOperations {
   // 激活节点的子节点（追加在其子级末尾），样式按级数解析；随后激活最后一个粘贴节点
   // 并重布局，整次粘贴记为一条可撤销的 add 命令
   async pasteFromEntry(entry: ClipboardEntry) {
-    const nodes = entry.payload as MindMapNode[];
-    console.log(
-      "[clipdbg] pasteFromEntry kind=", entry.kind,
-      "isArray=", Array.isArray(nodes), "count=", nodes?.length,
-      "anchor=", this.deps.activation.active?.text ?? null,
-    );
-    if (!Array.isArray(nodes) || !nodes.length || !this.deps.model.root) return;
+    // 载荷边界校验：剪贴板载荷可能来自外部应用（结构不可信），仅接受
+    // { text: string, ... } 形状的节点数组，脏载荷静默丢弃不粘贴
+    const raw: unknown = entry.payload;
+    const nodes = Array.isArray(raw)
+      ? raw.filter(
+          (n): n is MindMapNode =>
+            !!n &&
+            typeof n === "object" &&
+            typeof (n as MindMapNode).text === "string",
+        )
+      : [];
+    if (!nodes.length || !this.deps.model.root) return;
     const anchor = this.deps.activation.active;
     if (!anchor) return;
     // 目标父级即激活节点，处于折叠态时先展开，避免粘贴节点被可见性联动隐藏
     const parent = anchor;
-    if (parent.collapsed) {
-      parent.collapsed = false;
-      this.deps.model.applyCollapseVisibility();
-    }
+    this.deps.model.expand(parent);
     // 插入位置在构造命令前定格：追加到子级末尾（统一走 index splice，
     // undo/redo 重放同一索引，不依赖粘贴时的树状态）
     const index = parent.children.length;
@@ -222,46 +159,8 @@ export class NodeOperations {
       const edge = this.deps.model.createEdge(parent, node);
       return { parent, node, edge, inner, index: index + i };
     });
-    // 粘贴命令：redo/undo 对称地增删子树节点、父子连线与子树内部连线（结构重放走静默原语）
-    const cmd: HistoryCommand = {
-      type: "add",
-      redo: () => {
-        inserts.forEach(({ parent: p, node, edge, inner, index: idx }) => {
-          p.attachChild(node, idx);
-          this.deps.app.add(edge);
-          this.deps.app.add(inner);
-          this.deps.model.edges.push(edge, ...inner);
-        });
-      },
-      undo: () => {
-        // 逆序摘除：前序摘除不影响后序兄弟索引
-        for (let i = inserts.length - 1; i >= 0; i--) {
-          const { parent: p, node, edge, inner } = inserts[i];
-          p.detachChild(node);
-          const removed = [edge, ...inner];
-          this.deps.model.edges = this.deps.model.edges.filter((e) => !removed.includes(e));
-          removed.forEach((e2) => this.deps.app.remove(e2));
-        }
-      },
-      // 序列化载荷：粘贴子树内嵌数据（含生效样式与 id），外层连线与子树内部连线
-      // 按 id 引用；innerEdgeIds 顺序与 collectEdges 深度先序一致，编解码器按同序
-      // 重建连线对象
-      toJSON: () => ({
-        kind: "mindmap.paste",
-        payload: {
-          inserts: inserts.map(({ parent: p, node, edge, inner, index: idx }) => ({
-            parentId: p.id,
-            index: idx,
-            node: this.deps.model.serializeForHistory(node),
-            edgeId: edge.id,
-            innerEdgeIds: inner.map((e) => e.id),
-          })),
-        },
-      }),
-    };
-    this.deps.history.exec(cmd);
-    // 为粘贴子树绑定点击激活（app.add 包装只覆盖经它挂载的节点，splice 挂载的需手动绑定）
-    inserts.forEach(({ node }) => this.deps.editor.bind(node));
+    // 粘贴命令（工厂统一形状）：redo/undo 对称地增删子树节点、父子连线与子树内部连线
+    this.deps.history.exec(makePasteCommand(this.deps, inserts));
     await this.deps.onRelayout();
     // 最后一个粘贴节点进入激活态（常驻覆盖层，打字即编辑）
     this.deps.activation.activate(inserts[inserts.length - 1].node);
@@ -285,10 +184,7 @@ export class NodeOperations {
       }
     }
     // 目标父级处于折叠态时先展开，避免新建节点被可见性联动隐藏
-    if (parent.collapsed) {
-      parent.collapsed = false;
-      this.deps.model.applyCollapseVisibility();
-    }
+    this.deps.model.expand(parent);
     // 新节点级数 = 激活节点级数 + 1（按级数解析样式）
     const depth = this.deps.model.depthOf(parent) + 1;
     const style = this.deps.model.newNodeStyle(parent, depth);
@@ -298,30 +194,9 @@ export class NodeOperations {
     const node = this.deps.model.createNode(parent, style);
     node.text = text;
     const edge = this.deps.model.createEdge(parent, node);
-    const cmd: HistoryCommand = {
-      type: "add",
-      redo: () => {
-        parent.attachChild(node, index);
-        this.deps.app.add(edge);
-        this.deps.model.edges.push(edge);
-      },
-      undo: () => {
-        parent.detachChild(node);
-        this.deps.model.edges = this.deps.model.edges.filter((e) => e !== edge);
-        this.deps.app.remove(edge);
-      },
-      toJSON: () => ({
-        kind: "mindmap.add",
-        payload: {
-          parentId: parent.id,
-          index,
-          edgeId: edge.id,
-          node: this.deps.model.serializeForHistory(node),
-        },
-      }),
-    };
-    this.deps.history.exec(cmd);
-    this.deps.editor.bind(node);
+    this.deps.history.exec(
+      makeAddCommand(this.deps, { parent, node, index, edge }),
+    );
     await this.deps.onRelayout();
     this.deps.activation.activate(node);
     this.deps.emitChange("add");

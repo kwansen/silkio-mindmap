@@ -43,7 +43,7 @@ const build = (
       },
     },
     sel: { items: items as unknown as Text[] },
-    direction,
+    direction: { value: direction },
     activation: {
       // 单选派生：与 ActivationController.active 同语义
       active: items.length === 1 ? (items[0] as unknown as Text) : null,

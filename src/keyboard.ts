@@ -4,12 +4,13 @@ import type { ActivationController } from "./editing";
 import type { CollapseController } from "./collapse";
 import type { NodeOperations } from "./operations";
 import type { MindTree } from "./model";
-import type { LayoutDirection } from "./types";
+import type { LayoutDirectionRef } from "./types";
 
 export interface KeyboardNavDeps {
   model: Pick<MindTree, "root" | "collectTexts" | "sideOf">;
   sel: Pick<SelectionCapability<Text>, "items">;
-  direction: LayoutDirection;
+  // 布局方向共享引用（门面分发，切换方向只改 ref.value，无需逐模块同步）
+  direction: LayoutDirectionRef;
   activation: Pick<ActivationController, "active" | "activate" | "wake" | "keymapGuard">;
   collapse: Pick<CollapseController, "toggle">;
   operations: Pick<NodeOperations, "createRelated">;
@@ -18,11 +19,6 @@ export interface KeyboardNavDeps {
 // 键盘导航：方向键切换节点（垂直/层级）、Tab/Enter 新建、全局按键分发（原 MindMap 内联逻辑）
 export class KeyboardNav {
   constructor(private deps: KeyboardNavDeps) {}
-
-  // 切换布局方向：导航语义（层级/垂直轴互换）按新方向动态计算（navigate 运行时读取）
-  setDirection(direction: LayoutDirection) {
-    this.deps.direction = direction;
-  }
 
   // 全局按键（覆盖层常驻可编辑、持有焦点时由其自身两态机处理）：
   // 覆盖层失焦时重新聚焦交还输入（不吞键），方向键导航，Tab/Enter 新建节点
@@ -65,7 +61,7 @@ export class KeyboardNav {
     }
     const current = this.deps.activation.active ?? this.topLeftSelection();
     if (!this.deps.activation.active) this.deps.activation.activate(current);
-    if (this.deps.direction === "down") {
+    if (this.deps.direction.value === "down") {
       // 纵向布局：↓ 进入首子节点，↑ 回父节点，←→ 水平导航兄弟
       if (key === "ArrowDown" || key === "ArrowUp") {
         const toChild = key === "ArrowDown";
