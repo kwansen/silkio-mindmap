@@ -1154,8 +1154,7 @@ onUnmounted(() => {
       <div class="flex items-center gap-2 border-t border-gray-100 p-2.5">
         <input
           v-model="aiPrompt"
-          class="h-9 min-w-0 flex-1 rounded-lg bg-gray-50 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 disabled:opacity-60"
-          :disabled="aiBusy"
+          class="h-9 min-w-0 flex-1 rounded-lg bg-gray-50 px-3 text-sm text-gray-800 outline-none placeholder:text-gray-400"
           placeholder="输入指令或提问…"
           @keydown.enter="sendAi"
         />
