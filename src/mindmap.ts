@@ -11,7 +11,7 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { CLIPBOARD_CAPABILITY } from "@silker/core";
+import { CLIPBOARD_CAPABILITY, hasTextSelection } from "@silker/core";
 import type { ClipboardCapability } from "@silker/core";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
@@ -287,11 +287,27 @@ export class MindMap {
     if (this.clipboard) {
       const unregister = this.clipboard.register({
         kind: "mindmap",
-        serialize: () => this.operations.copySelection(),
+        // copy 全权决策（场景 UX，机制层不窥探选区/编辑状态）：编辑态覆盖层内有
+        // 文字选区 → 原生复制文字；光标折叠的编辑态与画布态 → 复制当前选中/激活
+        // 节点子树
+        onCopy: ({ target }) => {
+          if (this.activation.editing && target?.isContentEditable && hasTextSelection(target)) {
+            return "native";
+          }
+          return this.operations.copySelection();
+        },
         deserialize: (entry) => void this.operations.pasteFromEntry(entry),
-        pasteText: (text) => void this.operations.pasteText(text),
-        // 编辑会话中 copy/paste 事件放行原生文本行为（常驻覆盖层不能凭元素类型判定）
-        isEditing: () => this.activation.editing,
+        // 纯文本粘贴全权决策：编辑态覆盖层内纯文字（无换行/Tab）→ 原生粘贴到
+        // 光标；结构化文本（如飞书大纲复制，含换行/Tab）与其余画布态 → 解析为
+        // 节点树粘贴（文本形状的含义是本场景的领域知识）
+        onPasteText: ({ target, text }) => {
+          if (!text) return "native";
+          if (this.activation.editing && target?.isContentEditable && !/[\n\t]/.test(text)) {
+            return "native";
+          }
+          void this.operations.pasteText(text);
+          return "handled";
+        },
       });
       // 注销并入 cleanups，destroy 时撤销事件分发参与
       this.cleanups.push(unregister);

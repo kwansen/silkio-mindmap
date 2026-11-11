@@ -109,12 +109,16 @@ export class NodeOperations {
       return true;
     });
     const payload = roots.map((n) => this.deps.model.serializeNode(n));
+    // text 通道输出层级大纲文本：顶层无缩进，子孙按深度叠加 Tab——粘贴到飞书等
+    // 大纲类应用即还原树形层级（与 parseTextTree 解析规则互逆）；html 通道渲染
+    // 嵌套 ul/li 大纲列表（机制层只包 data-silker 信封，大纲格式是本场景的
+    // 文本领域知识，不走 Clipboard.ts）
+    const text = toOutlineText(payload).join("\n");
     return {
       kind: "mindmap",
       payload,
-      // text 通道输出层级大纲文本：顶层无缩进，子孙按深度叠加 Tab——粘贴到飞书等
-      // 大纲类应用即还原树形层级（与 parseTextTree 解析规则互逆）
-      text: toOutlineText(payload).join("\n"),
+      text,
+      html: toOutlineHtml(text),
     };
   }
 
@@ -210,6 +214,53 @@ function toOutlineText(nodes: MindMapNode[], depth = 0): string[] {
     ];
     return depth <= 1 && i > 0 ? ["", ...block] : block;
   });
+}
+
+// 大纲文本 → 嵌套列表 HTML（剪贴板 text/html 通道的可见内容，外部应用粘贴出
+// 层级列表而非纯文本块）：缩进规则与 parseTextTree 一致（Tab 与 4 空格组计深度，
+// 最小缩进为顶层），栈式构建层级后递归渲染；空行跳过
+function toOutlineHtml(text: string): string {
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((l) => l.trim().length);
+  if (!lines.length) return "";
+  const depthOf = (line: string): number => {
+    let tabs = 0;
+    let spaces = 0;
+    for (const ch of line) {
+      if (ch === "\t") {
+        tabs++;
+        spaces = 0;
+      } else if (ch === " ") {
+        spaces++;
+      } else break;
+    }
+    return tabs + Math.floor(spaces / 4);
+  };
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  interface Item {
+    text: string;
+    children: Item[];
+  }
+  const min = Math.min(...lines.map(depthOf));
+  const roots: Item[] = [];
+  const stack: { depth: number; item: Item }[] = [];
+  for (const line of lines) {
+    const depth = Math.max(0, depthOf(line) - min);
+    const item: Item = { text: esc(line.trim()), children: [] };
+    while (stack.length && stack[stack.length - 1]!.depth >= depth) stack.pop();
+    (stack[stack.length - 1]?.item.children ?? roots).push(item);
+    stack.push({ depth, item });
+  }
+  const render = (items: Item[]): string =>
+    `<ul style="margin:0;padding-left:1.5em">` +
+    items
+      .map((i) => `<li>${i.text}${i.children.length ? render(i.children) : ""}</li>`)
+      .join("") +
+    `</ul>`;
+  return render(roots);
 }
 
 // 结构化文本解析为节点树（编辑态/激活态粘贴多行缩进文本）：按行拆分，行首
