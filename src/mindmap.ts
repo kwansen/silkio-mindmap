@@ -324,6 +324,11 @@ export class MindMap {
         bindNode: (n) => this.bindNode(n),
         sel: this.sel,
         activation: this.activation,
+        // 画布交互忙守卫（拖拽/框选），谓词由 busyState 单一出处派生
+        busy: () => {
+          const state = this.busyState();
+          return state.dragging || state.marquee;
+        },
         onRelayout: () => this.relayout(),
         emitChange: (type) => this.emitChange(type),
       },

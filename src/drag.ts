@@ -6,6 +6,7 @@ import { POINTER_CAPABILITY } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import { DragGhost } from "./DragGhost";
 import { makeMoveCommand } from "./commands";
+import { invariant } from "./invariants";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import { dropIndex, dropTarget } from "./drop";
 import { ACTIVE_COLOR } from "./colors";
@@ -287,10 +288,12 @@ export class DragInteractions {
       w: drag.grabBox.w,
       h: drag.grabBox.h,
     };
-    // 合集虚影跟随鼠标
+    // 合集虚影跟随鼠标（floatBox 刚在上文赋值，取局部变量避免非空断言）
+    const box = this.deps.ghost.floatBox;
+    invariant(box, "onMove: floatBox 未初始化");
     if (this.dragChip) {
-      this.dragChip.x = this.deps.ghost.floatBox!.x;
-      this.dragChip.y = this.deps.ghost.floatBox!.y;
+      this.dragChip.x = box.x;
+      this.dragChip.y = box.y;
     }
     // 候选落点：命中时跳过被拖子树，取其下方的真实目标
     const subtree = new Set<Node>();
@@ -425,15 +428,19 @@ export class DragInteractions {
           if (newIndex === old.children.indexOf(n)) continue;
           const edge = this.deps.model.edges.find(
             (e) => e.fromNode === old && e.toNode === n,
-          )!;
+          );
+          // 换父节点必有其父子连线（挂载时统一经 mountEdges 建立并保持同步）
+          invariant(edge, "commitDrop: 未找到同父排序节点的父子连线");
+          const style = this.deps.model.styleOf(n);
+          invariant(style, "commitDrop: 节点缺少层级样式");
           moves.push({
             node: n,
             oldParent: old,
             oldIndex: old.children.indexOf(n),
             newParent: parent,
             newIndex,
-            oldStyle: this.deps.model.styleOf(n)!,
-            newStyle: this.deps.model.styleOf(n)!,
+            oldStyle: style,
+            newStyle: style,
             oldEdge: edge,
             newEdge: edge,
           });
@@ -447,14 +454,18 @@ export class DragInteractions {
         };
         const oldEdge = this.deps.model.edges.find(
           (e) => e.fromNode === old && e.toNode === n,
-        )!;
+        );
+        // 换父节点必有其父子连线（挂载时统一经 mountEdges 建立并保持同步）
+        invariant(oldEdge, "commitDrop: 未找到被拖动节点的原父子连线");
+        const oldStyle = this.deps.model.styleOf(n);
+        invariant(oldStyle, "commitDrop: 节点缺少层级样式");
         moves.push({
           node: n,
           oldParent: old,
           oldIndex: old.children.indexOf(n),
           newParent: parent,
           newIndex,
-          oldStyle: this.deps.model.styleOf(n)!,
+          oldStyle,
           newStyle,
           oldEdge,
           newEdge: this.deps.model.createEdge(parent, n),

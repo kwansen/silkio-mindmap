@@ -64,6 +64,10 @@ export interface AIEditingDeps {
     ActivationController,
     "active" | "activate" | "deactivate" | "editing"
   >;
+  // 画布交互忙守卫（拖拽/框选进行中，编辑态由 activation.editing 单独判定）：
+  // run 入口与 exec 前各查一次——生成期间用户可能开始拖拽，exec 前不复查会与
+  // 进行中的变更互踩（拖拽态持有 ghost/高亮引用，AI 删除目标节点即悬空）
+  busy?: () => boolean;
   onRelayout: () => Promise<void> | void;
   emitChange: (type: MindMapChangeType) => void;
 }
@@ -98,6 +102,8 @@ export class AIEditingController {
     const text = prompt.trim();
     if (!text) throw new Error("请输入 AI 指令");
     if (activation.editing) throw new Error("请先结束当前编辑再执行 AI 操作");
+    if (this.deps.busy?.())
+      throw new Error("画布交互进行中（拖拽/框选），请稍后再执行 AI 操作");
 
     const anchorId = options.anchorId ?? activation.active?.id ?? root.id!;
     const anchorNode = model.nodeById(anchorId) ?? root;
@@ -180,6 +186,9 @@ export class AIEditingController {
       [answer, historyText].filter(Boolean).join("\n\n") || undefined;
     if (!commands.length)
       return { applied: 0, ops, steps, answer: mergedAnswer };
+    // exec 前复查交互忙态：生成期间用户可能开始拖拽/框选，带伤执行会互踩
+    if (this.deps.busy?.())
+      throw new Error("AI 编辑被画布交互打断（拖拽/框选进行中），请重试");
     // 清空选中态：AI 可能删除选中节点，先摘除悬空的覆盖层引用
     this.deps.activation.deactivate();
     this.deps.history.exec(compose("ai", ...commands));

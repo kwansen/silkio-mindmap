@@ -70,9 +70,16 @@ export function createMindmapCodec(deps: MindmapCodecDeps) {
   // 注册表只含树上查不到的 id（ensureNode 仅在树上缺失时登记），两序等价。
   // 载荷 id 可空（与运行时 Text.id 对齐），null 视为解析失败返回 null，
   // 由调用方整体放弃导入
+  // 树索引快照（惰性建）：首次树查找建一次 O(n) 快照，后续复用——大栈导入
+  // 时多次 miss 不再逐次全树遍历。解码只解析不执行命令，树结构在整个
+  // 会话内不变，快照始终有效
+  let treeIndex: Map<string, Text> | null = null;
   function resolveNode(id: string | null | undefined): Text | null {
     if (!id) return null;
-    return nodes.get(id) ?? model.nodeById(id) ?? null;
+    const hit = nodes.get(id);
+    if (hit) return hit;
+    treeIndex ??= model.indexById();
+    return treeIndex.get(id) ?? null;
   }
 
   // 把节点子树的全部 id 登记进注册表（renderNode 重建后子树结构已完整）
