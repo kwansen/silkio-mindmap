@@ -236,7 +236,7 @@ export class MindMap {
       highlight: this.highlight,
       sel: this.sel,
       history: this.history,
-      onNavigate: (key) => this.keyboard.navigate(key),
+      onNavigate: (key) => void this.keyboard.navigate(key),
       onCreateRelated: (e, text) => this.operations.createRelated(e, text),
       onDelete: () => this.operations.deleteSelection(),
       onNodePress: (e) => this.drag.onOverlayDown(e),

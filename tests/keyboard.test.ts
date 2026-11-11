@@ -27,13 +27,14 @@ const f = (x: number, y: number, width = 100, height = 40): FT => {
 };
 
 // 构造 KeyboardNav：items 为选集，all 为模型收集到的全部节点（collectTexts stub 返回），
-// activated 记录 activate 调用（导航结果断言用）；direction 缺省 'right'
+// activated 记录 activate 调用（导航结果断言用）；direction 缺省 'right'，sideOf 缺省 'right'
+// （折叠展开兜底 pointsToChildren 消费，空间导航本身不依赖）
 const build = (
   items: FT[],
   root: FT | null,
   all: FT[],
   activated: FT[],
-  direction: "left" | "right" | "down" = "right",
+  direction: "left" | "right" | "down" | "both" = "right",
 ) => {
   const deps = {
     model: {
@@ -41,6 +42,7 @@ const build = (
       collectTexts: (_n: Text, out: Text[]) => {
         all.forEach((t) => out.push(t));
       },
+      sideOf: () => "right" as const,
     },
     sel: { items: items as unknown as Text[] },
     direction: { value: direction },
@@ -141,9 +143,10 @@ describe("navigateVertical 垂直导航评分", () => {
   });
 });
 
-// 纵向布局（down）的方向键导航：层级与兄弟轴互换——↑↓ 走层级，←→ 走水平兄弟
-describe("direction 'down' 层级导航", () => {
-  it("ArrowDown 进入首子节点", () => {
+// 纵向布局（down）：层级移动是空间导航的自然结果——子节点在正下方、父节点在正上方，
+// 垂直评分天然命中它们（↓ 进子、↑ 回父），←→ 水平导航兄弟
+describe("direction 'down' 空间导航", () => {
+  it("ArrowDown 命中正下方的首子节点", async () => {
     const root = f(0, 0);
     const c1 = f(0, 100);
     const c2 = f(200, 100);
@@ -152,22 +155,112 @@ describe("direction 'down' 层级导航", () => {
     c2.parent = root as unknown as FT;
     const activated: FT[] = [];
     const nav = build([root], root, [root, c1, c2], activated, "down");
-    nav.navigate("ArrowDown");
+    await nav.navigate("ArrowDown");
     expect(activated).toEqual([c1]);
   });
 
-  it("ArrowUp 回父节点", () => {
+  it("ArrowUp 命中正上方的父节点", async () => {
     const root = f(0, 0);
     const c1 = f(0, 100);
     c1.parent = root as unknown as FT;
     const activated: FT[] = [];
     const nav = build([c1], root, [root, c1], activated, "down");
-    nav.navigate("ArrowUp");
+    await nav.navigate("ArrowUp");
     expect(activated).toEqual([root]);
   });
 });
 
-describe("navigateHorizontal 水平导航评分（direction 'down' 用）", () => {
+// 双向布局（both）：←→ 同样按视觉位置导航——根节点左侧子树按 Left 进入（旧层级实现
+// 依赖 sideOf，根节点恒判 'right' 导致 Left 失效，此为回归用例）
+describe("direction 'both' 空间导航", () => {
+  it("根节点 ArrowLeft 命中左侧子节点", async () => {
+    const root = f(0, 0);
+    const rightChild = f(200, 0);
+    const leftChild = f(-300, 0);
+    (root as unknown as { _children: FT[] })._children = [
+      rightChild,
+      leftChild,
+    ];
+    const activated: FT[] = [];
+    const nav = build(
+      [root],
+      root,
+      [root, rightChild, leftChild],
+      activated,
+      "both",
+    );
+    await nav.navigate("ArrowLeft");
+    expect(activated).toEqual([leftChild]);
+  });
+
+  it("左侧节点 ArrowLeft 继续深入其子节点", async () => {
+    const root = f(0, 0);
+    const leftChild = f(-300, 0);
+    const grand = f(-500, 0);
+    leftChild.parent = root as unknown as FT;
+    grand.parent = leftChild as unknown as FT;
+    const activated: FT[] = [];
+    const nav = build([leftChild], root, [root, leftChild, grand], activated, "both");
+    await nav.navigate("ArrowLeft");
+    expect(activated).toEqual([grand]);
+  });
+});
+
+// 折叠展开兜底：该方向无可见候选且按键指向子侧时先展开再重试（子节点显现后参与空间导航）
+describe("折叠节点展开兜底", () => {
+  const buildWithToggle = (
+    current: FT,
+    root: FT,
+    all: FT[],
+    toggle: () => Promise<void>,
+  ) => {
+    const activated: FT[] = [];
+    const nav0 = build([current], root, all, activated, "right");
+    // 替换 collapse.toggle 为可注入的假实现（原 stub 为空操作）
+    (
+      nav0 as unknown as { deps: { collapse: { toggle: () => Promise<void> } } }
+    ).deps.collapse.toggle = toggle;
+    return { nav: nav0, activated };
+  };
+
+  it("按键指向子侧且无候选：展开后进入子节点", async () => {
+    const root = f(0, 0);
+    const cur = f(0, 100);
+    const child = f(150, 100); // 展开后才显现（不在 all 中即不可见）
+    cur.parent = root as unknown as FT;
+    (cur as unknown as { _children: FT[] })._children = [child];
+    child.parent = cur as unknown as FT;
+    cur.collapsed = true;
+    const all = [root, cur];
+    const toggled: boolean[] = [];
+    const { nav, activated } = buildWithToggle(cur, root, all, async () => {
+      toggled.push(true);
+      cur.collapsed = false;
+      all.push(child); // 展开使子节点可见（collectTexts 由此返回）
+    });
+    await nav.navigate("ArrowRight");
+    expect(toggled).toEqual([true]);
+    expect(activated).toEqual([child]);
+  });
+
+  it("按键背离子侧且无候选：不展开", async () => {
+    const root = f(0, 0);
+    const cur = f(0, 100);
+    const child = f(150, 100);
+    cur.parent = root as unknown as FT;
+    (cur as unknown as { _children: FT[] })._children = [child];
+    child.parent = cur as unknown as FT;
+    cur.collapsed = true;
+    const toggled: boolean[] = [];
+    const { nav } = buildWithToggle(cur, root, [root, cur], async () => {
+      toggled.push(true);
+    });
+    await nav.navigate("ArrowLeft"); // sideOf 缺省 'right'，子侧在右，Left 背离子侧
+    expect(toggled).toEqual([]);
+  });
+});
+
+describe("navigateHorizontal 水平导航评分（←→ 空间导航用）", () => {
   // navigateHorizontal 为私有方法，测试经类型断言直调
   const navigateHorizontal = (
     nav: KeyboardNav,
