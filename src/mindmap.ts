@@ -183,8 +183,21 @@ export class MindMap {
     const editor = this.app.require(TEXT_EDITOR_CAPABILITY);
     // 输入时重新布局，并同步发出变更通知（宿主 UI 如文档标题/自动保存随每次输入
     // 实时更新；历史记录不受影响，仍由 onEditEnd 以整个编辑会话为一次变更入栈）
-    editor.onInput = () => {
-      this.relayout();
+    editor.onInput = (text) => {
+      void this.relayout().then(() => {
+        // autoWidth 节点随输入长宽，可能越出视口：布局落定后按新包围盒平移
+        // （原 text-editor 插件的输入跟随行为上移至场景）
+        const p = text.getWorldPoint();
+        if (
+          this.app.camera.scrollIntoView({
+            minX: p.x,
+            minY: p.y,
+            maxX: p.x + text.width,
+            maxY: p.y + text.height,
+          })
+        )
+          this.app.requestCameraRender();
+      });
       this.emitChange("text");
     };
     editor.onEditStart = (el, text) => this.activation.onEditStart(el, text);

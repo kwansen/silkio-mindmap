@@ -144,30 +144,20 @@ export class ActivationController {
     this.deps.app.requestOverlayRender();
   }
 
-  // 激活节点越出屏幕时平移视口（编辑由 editor.start 自带滚动，此处仅覆盖键盘导航）
+  // 激活节点越出屏幕时平移视口（键盘导航等激活路径）：几何与边界判断收口于
+  // 相机 scrollIntoView，此处只提供节点世界包围盒
   private scrollNodeIntoView(text: Text) {
-    const vp = this.deps.app.camera.viewport;
     const p = text.getWorldPoint();
-    const sx = p.x * vp.scale + vp.x;
-    const sy = p.y * vp.scale + vp.y;
-    const right = sx + text.width * vp.scale;
-    const bottom = sy + text.height * vp.scale;
-    const dx =
-      sx < 20
-        ? 20 - sx
-        : right > window.innerWidth - 20
-          ? window.innerWidth - 20 - right
-          : 0;
-    const dy =
-      sy < 20
-        ? 20 - sy
-        : bottom > window.innerHeight - 20
-          ? window.innerHeight - 20 - bottom
-          : 0;
-    if (dx === 0 && dy === 0) return;
-    this.deps.app.camera.setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy });
-    // 相机-only 变更：轻量路径（blit 快照 + 重画覆盖层）
-    this.deps.app.requestCameraRender();
+    if (
+      this.deps.app.camera.scrollIntoView({
+        minX: p.x,
+        minY: p.y,
+        maxX: p.x + text.width,
+        maxY: p.y + text.height,
+      })
+    )
+      // 相机-only 变更：轻量路径（blit 快照 + 重画覆盖层）
+      this.deps.app.requestCameraRender();
   }
 
   // 编辑框按键两态机（飞书模型）——以 this.editing 为唯一状态来源（覆盖层常驻，blur/唤醒随时切换显隐）：
