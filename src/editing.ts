@@ -24,6 +24,16 @@ export interface ActivationDeps {
   emitChange: (type: MindMapChangeType) => void;
 }
 
+// 复制/剪切的选区语义谓词："有选区即原生，无选区画布接管"。文档内存在非折叠
+// 文字选区即为真——画布（canvas/sky）不持有 DOM 文字选区，非折叠选区必然来自
+// 文字容器（编辑覆盖层内的文字，或宿主页面其它区域如 AI 面板），两者都归宿主
+// 原生复制/剪切，无需区分归属
+export function hasDocumentTextSelection(): boolean {
+  if (typeof window === "undefined") return false;
+  const sel = window.getSelection?.();
+  return !!sel && !sel.isCollapsed;
+}
+
 // 激活/编辑控制器：单选激活态与编辑态的两态机（原 MindMap 内联逻辑）。
 // editing 为编辑态唯一状态来源（覆盖层常驻、显隐由本状态驱动），editingOld 为编辑会话起点快照
 export class ActivationController {
@@ -119,20 +129,24 @@ export class ActivationController {
   }
 
   // 键位分发守卫：onGlobalKeydown 与命令插件共用。
-  // 覆盖层持焦 + 编辑态：普通按键归输入（false）；仅放行 Ctrl+C/X 复制/剪切当前
-  // 节点子树（已有文字选区时归原生复制文字）；mod+a 全选文字、mod+z 撤销等其余
-  // 组合键归覆盖层原生行为，不进画布命令分发。
+  // 复制/剪切的选区语义："有选区即原生，无选区画布接管"——文档内存在非折叠
+  // 文字选区（编辑覆盖层内选中文字，或宿主页面其它区域如 AI 面板）时 mod+c/x
+  // 归原生复制/剪切；无选区（激活态/光标折叠的编辑态）时画布接管复制节点子树。
+  // 画布自身不持有 DOM 文字选区，非折叠选区必然来自文字容器，无需区分归属。
+  // 覆盖层持焦 + 编辑态：普通按键归输入（false）；mod+a 全选文字、mod+z 撤销等
+  // 其余组合键归覆盖层原生行为，不进画布命令分发。
   // 覆盖层持焦 + 激活态：修饰键组合放行命令分发（撤销/全选画布），普通按键归输入。
   // 未持焦（激活态）：仅响应画布与页面空白处的按键，页面其它控件输入不受影响
   keymapGuard(e: KeyboardEvent): boolean {
     const focus = this.deps.editor.hasFocus();
     const modifiers = e.ctrlKey || e.metaKey || e.altKey;
+    const key = e.key.toLowerCase();
+    if (modifiers && (key === "c" || key === "x") && hasDocumentTextSelection()) {
+      return false;
+    }
     if (focus && !modifiers) return false;
     if (focus && this.editing) {
-      const key = e.key.toLowerCase();
       if (key !== "c" && key !== "x") return false;
-      const sel = typeof window !== "undefined" ? window.getSelection?.() : null;
-      if (sel && !sel.isCollapsed) return false;
     }
     return focus || (e.target as HTMLElement) === document.body ||
       (e.target as HTMLElement) === this.deps.app.canvas;

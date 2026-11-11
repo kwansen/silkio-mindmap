@@ -11,7 +11,7 @@ import type { SelectionCapability, TextEditorCapability, ViewportCapability } fr
 import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
 import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
 import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { CLIPBOARD_CAPABILITY, hasTextSelection } from "@silker/core";
+import { CLIPBOARD_CAPABILITY } from "@silker/core";
 import type { ClipboardCapability } from "@silker/core";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
@@ -22,7 +22,7 @@ import { CollapseToggle } from "./CollapseToggle";
 import { MindTree } from "./model";
 import { createMindmapCodec } from "./history-codec";
 import { CollapseController } from "./collapse";
-import { ActivationController } from "./editing";
+import { ActivationController, hasDocumentTextSelection } from "./editing";
 import { NodeOperations } from "./operations";
 import { AIEditingController, AIEditingPlugin } from "./ai";
 import { KeyboardNav } from "./keyboard";
@@ -289,13 +289,12 @@ export class MindMap {
     if (this.clipboard) {
       const unregister = this.clipboard.register({
         kind: "mindmap",
-        // copy 全权决策（场景 UX，机制层不窥探选区/编辑状态）：编辑态覆盖层内有
-        // 文字选区 → 原生复制文字；光标折叠的编辑态与画布态 → 复制当前选中/激活
-        // 节点子树
-        onCopy: ({ target }) => {
-          if (this.activation.editing && target?.isContentEditable && hasTextSelection(target)) {
-            return "native";
-          }
+        // copy 全权决策（场景 UX，机制层不窥探选区/编辑状态）。选区语义收口为
+        // "有选区即原生，无选区画布接管"：文档内存在非折叠文字选区（编辑覆盖层
+        // 内选中文字，或宿主页面其它区域如 AI 面板）→ 原生复制；无选区（激活态/
+        // 光标折叠的编辑态）→ 复制当前选中/激活节点子树
+        onCopy: () => {
+          if (hasDocumentTextSelection()) return "native";
           return this.operations.copySelection();
         },
         deserialize: (entry) => void this.operations.pasteFromEntry(entry),
