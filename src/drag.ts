@@ -8,7 +8,7 @@ import { DragGhost } from "./DragGhost";
 import { makeMoveCommand } from "./commands";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import { dropIndex, dropTarget } from "./drop";
-import { ACTIVE_COLOR } from "./editing";
+import { ACTIVE_COLOR } from "./colors";
 import type { ActivationController } from "./editing";
 import type { CollapseController } from "./collapse";
 import type { KeyboardNav } from "./keyboard";
@@ -432,8 +432,8 @@ export class DragInteractions {
             oldIndex: old.children.indexOf(n),
             newParent: parent,
             newIndex,
-            oldStyle: this.deps.model.nodeStyles.get(n)!,
-            newStyle: this.deps.model.nodeStyles.get(n)!,
+            oldStyle: this.deps.model.styleOf(n)!,
+            newStyle: this.deps.model.styleOf(n)!,
             oldEdge: edge,
             newEdge: edge,
           });
@@ -443,7 +443,7 @@ export class DragInteractions {
         // （未配置级数样式时 redo 跳过应用，保持原样，与旧行为一致）
         const newStyle = {
           ...this.deps.model.levelStyle(this.deps.model.depthOf(parent) + 1),
-          ...this.deps.model.customStyles.get(n),
+          ...this.deps.model.customStyleOf(n),
         };
         const oldEdge = this.deps.model.edges.find(
           (e) => e.fromNode === old && e.toNode === n,
@@ -454,7 +454,7 @@ export class DragInteractions {
           oldIndex: old.children.indexOf(n),
           newParent: parent,
           newIndex,
-          oldStyle: this.deps.model.nodeStyles.get(n)!,
+          oldStyle: this.deps.model.styleOf(n)!,
           newStyle,
           oldEdge,
           newEdge: this.deps.model.createEdge(parent, n),

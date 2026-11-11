@@ -2,22 +2,33 @@ import { Text } from "@silker/core";
 import type { App, EdgeShape } from "@silker/core";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";
+import type { PasteInsert } from "./commands";
 import { defaultStyle } from "./types";
 import type { LayoutDirection, LayoutDirectionRef, MindMapNode, Style } from "./types";
 
 // 思维导图数据模型：持有节点树与连线集合，负责建模（数据 → Text 树）、级数样式解析、
-// 折叠可见性联动与序列化导出。只做模型维护，不涉及交互与覆盖层（各 controller 单向依赖本模块）
+// 折叠可见性联动与序列化导出。只做模型维护，不涉及交互与覆盖层（各 controller 单向依赖本模块）。
+// 连线表与样式缓存为私有状态，只能经下方原语访问——"连线表↔场景同步"与
+// "节点样式登记"两条不变量由本类收口，外部不得绕开（此前双份真值漂移的收口点）
 export class MindTree {
   // 树根节点（init 挂载后非空，未初始化前为 null）
   root: Text | null = null;
-  // 全部父子连线（换父/增删节点时由各命令闭包同步维护）
-  edges: MindEdge[] = [];
+  // 全部父子连线（私有真值，换父/增删节点时经 mount/unmount/replace 原语同步维护；
+  // 外部经 edges 只读访问器消费）
+  private _edges: MindEdge[] = [];
+  // 连线表只读访问器：查询类消费方（死连线计算/连线查找/导出）按只读序列消费，
+  // 编译期阻断外部直写（push/赋值），结构变更必须走 mount/unmount/replace 原语
+  get edges(): readonly MindEdge[] {
+    return this._edges;
+  }
   // 级数样式配置（index 0 为根节点），renderNode 与新建节点按级数取值
   readonly levelStyles: Style[];
   // 每个节点创建时实际使用的样式，供无级数配置时新建节点沿用参考节点样式
-  readonly nodeStyles = new WeakMap<Text, Style>();
+  // （私有真值：读经 styleOf，写经 renderNode/applyNodeStyle/registerNodeStyle 收口）
+  private readonly nodeStyles = new WeakMap<Text, Style>();
   // 节点数据上的用户自定义样式（未自定义的节点不记录），换父重设样式时与新级数默认样式合并
-  readonly customStyles = new WeakMap<Text, Style>();
+  // （私有真值：读经 customStyleOf，写经 renderNode/registerCustomStyle 收口）
+  private readonly customStyles = new WeakMap<Text, Style>();
   // 连线样式（构造时从 options 记录）
   private edgeStyle: EdgeShape;
   // 布局方向共享引用（门面创建并分发，切换方向只改这一处状态）：
@@ -45,29 +56,29 @@ export class MindTree {
   // vertical 标志在渲染时动态分支，无需重建连线对象）
   applyDirection(direction: LayoutDirection) {
     const vertical = direction === "down";
-    this.edges.forEach((e) => (e.vertical = vertical));
+    this._edges.forEach((e) => (e.vertical = vertical));
   }
 
   // 连线表与场景的同步原语（唯一出口）：命令 redo/undo、连线样式切换、编解码器
   // 重建统一走此收口——模型连线表与场景连线层由同一处维护，命令闭包不再手工双写
   //（此前遗漏一处即静默脏数据，是双份真值问题的收口点）
   mountEdges(edges: MindEdge[]) {
-    this.edges.push(...edges);
+    this._edges.push(...edges);
     this.app?.add(edges);
   }
 
   // 从连线表与场景中摘除指定连线（按对象同一性过滤）
   unmountEdges(edges: MindEdge[]) {
     const set = new Set(edges);
-    this.edges = this.edges.filter((e) => !set.has(e));
+    this._edges = this._edges.filter((e) => !set.has(e));
     this.app?.remove(edges);
   }
 
   // 整表替换：摘除当前全部连线、换入新连线表（对象引用稳定，undo/redo 双向可用）
   replaceEdges(next: MindEdge[]) {
-    const prev = [...this.edges];
-    this.edges.length = 0;
-    this.edges.push(...next);
+    const prev = [...this._edges];
+    this._edges.length = 0;
+    this._edges.push(...next);
     if (this.app) {
       this.app.remove(prev);
       this.app.add(next);
@@ -91,7 +102,7 @@ export class MindTree {
     if (shape === this.edgeStyle) return null;
     const before = this.edgeStyle;
     this.edgeStyle = shape;
-    const next = this.edges.map((e) => {
+    const next = this._edges.map((e) => {
       const ne = this.createEdge(e.fromNode, e.toNode);
       ne.id = e.id;
       ne.vertical = e.vertical;
@@ -188,7 +199,7 @@ export class MindTree {
       });
     };
     walk(this.root);
-    this.edges.forEach((e) => {
+    this._edges.forEach((e) => {
       e.visible = e.fromNode.visible && e.toNode.visible;
     });
   }
@@ -260,9 +271,46 @@ export class MindTree {
     return this.nodeStyles.get(ref) ?? defaultStyle;
   }
 
-  // 按解析出的样式创建默认新节点，宽度范围与参考节点保持一致（元函数：样式构造）
+  // 节点实际生效样式读取（nodeStyles 私有真值的只读出口）：AI move/拖拽换父定格
+  // undo 还原样式时读取"创建时生效样式"
+  styleOf(node: Text): Style | undefined {
+    return this.nodeStyles.get(node);
+  }
+
+  // 用户自定义样式读取（customStyles 私有真值的只读出口）：换父重设样式时与
+  // 新级数默认样式合并
+  customStyleOf(node: Text): Style | undefined {
+    return this.customStyles.get(node);
+  }
+
+  // 节点样式登记（nodeStyles 私有真值的写出口，测试/外部建桩场景补登记用；
+  // 常规路径由 renderNode/createNode/applyNodeStyle 内部登记）
+  registerNodeStyle(node: Text, style: Style) {
+    this.nodeStyles.set(node, style);
+  }
+
+  // 用户自定义样式登记（customStyles 私有真值的写出口，测试/外部建桩场景用）
+  registerCustomStyle(node: Text, style: Style) {
+    this.customStyles.set(node, style);
+  }
+
+  // 按解析出的样式创建默认新节点，宽度范围与参考节点保持一致（元函数：样式构造）。
+  // 创建即登记实际生效样式（nodeStyles 收口）：调用方不再手工 set，避免漏登记漂移
   createNode(ref: Text, style: Style): Text {
-    return this.createText("新节点", style, ref.widthRange ?? [0, 200]);
+    const node = this.createText("新节点", style, ref.widthRange ?? [0, 200]);
+    this.nodeStyles.set(node, style);
+    return node;
+  }
+
+  // 子树插入编排原语（AI add 与剪贴板粘贴共用同一份，消除两处手写漂移）：
+  // 渲染数据子树（级数 = 目标级数 + 1，按级数解析样式）→ 深度先序收集子树内连线 →
+  // 创建父子连线，返回 paste 命令工厂所需的完整插入载荷。
+  // index 为插入后的兄弟位次（0 起），由调用方定格（命令重放不依赖创建时树状态）
+  buildSubtreeInsert(parent: Text, data: MindMapNode, index: number): PasteInsert {
+    const node = this.renderNode(data, this.depthOf(parent) + 1);
+    const inner: MindEdge[] = [];
+    this.collectEdges(node, inner);
+    return { parent, node, edge: this.createEdge(parent, node), inner, index };
   }
 
   // 递归收集所有父子连线（每条边绑定父子节点，元函数：被构造时调用）

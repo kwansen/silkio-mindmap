@@ -241,6 +241,8 @@ describe("AIEditingController.compile：批内 move + delete 的连线清理", (
       levelStyles: [],
       nodeStyles: new WeakMap(),
       customStyles: new WeakMap(),
+      styleOf: () => ({}),
+      customStyleOf: () => ({}),
       nodeById: (id: string) => [a, x, b, c].find((t) => t.id === id) ?? null,
       depthOf: (node: any) => {
         let d = 0;

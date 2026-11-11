@@ -65,7 +65,7 @@ describe("MindTree.serializeNode / toJSON", () => {
     const tree = newTree();
     tree.root = asT(root);
     const custom: Style = { ...defaultStyle, color: "#ff0000" };
-    tree.customStyles.set(asT(b), custom);
+    tree.registerCustomStyle(asT(b), custom);
     const json = tree.toJSON();
     expect(json.children[0]).not.toHaveProperty("style");
     expect(json.children[1].style).toEqual(custom);
@@ -100,7 +100,7 @@ describe("MindTree.depthOf / levelStyle / newNodeStyle", () => {
     expect(withCfg.newNodeStyle(asT(ref), 1)).toBe(s1);
     const noCfg = newTree();
     const cached: Style = { ...defaultStyle, color: "#123456" };
-    noCfg.nodeStyles.set(asT(ref), cached);
+    noCfg.registerNodeStyle(asT(ref), cached);
     expect(noCfg.newNodeStyle(asT(ref), 3)).toBe(cached);
   });
 });
@@ -116,7 +116,7 @@ describe("MindTree.applyCollapseVisibility", () => {
     const e1 = { fromNode: root, toNode: c1, visible: true };
     const e2 = { fromNode: root, toNode: c2, visible: true };
     const e3 = { fromNode: c1, toNode: g, visible: true };
-    tree.edges = [e1, e2, e3] as unknown as MindEdge[];
+    tree.mountEdges([e1, e2, e3] as unknown as MindEdge[]);
 
     tree.applyCollapseVisibility();
     expect(root.visible).toBe(true);

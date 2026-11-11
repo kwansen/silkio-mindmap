@@ -12,20 +12,14 @@ export type {
 export { BuiltinTreeLayout } from "./layout"
 export { AUTO_LAYOUT_CAPABILITY } from "./auto-layout"
 export type { AutoLayoutCapability, AutoLayoutOptions } from "./auto-layout"
-// AI 编辑：契约 + 控制器 + 插件（生成适配器由宿主经 MindMapOptions.ai 注入）
+// AI 编辑：契约 + 控制器 + 插件（生成适配器由宿主经 MindMapOptions.ai 注入）。
+// 操作解析/目标定位等内部纯函数不进入公共 API——宿主只消费控制器与协议类型；
+// 包内测试与扩展经 "./ai"（或 ai-protocol/ai-report 子模块）导入
 export {
   AIEditingController,
   AIEditingPlugin,
   AI_EDITING_CAPABILITY,
   defaultAIEditPrompt,
-  normalizeAIOps,
-  normalizeRenderTree,
-  parseAIResponse,
-  nodePath,
-  collectTargetCandidates,
-  parseTargetSegment,
-  matchTargetSegment,
-  resolveTargetByPath,
 } from "./ai"
 export type {
   AIMindMapOp,
@@ -35,11 +29,13 @@ export type {
   AIMindMapDeleteOp,
   AIMindMapRenderOp,
   AIMindMapAnswerOp,
+  AIMindMapUndoOp,
+  AIMindMapRedoOp,
+  AIMindMapHistoryOp,
   AIEditRequest,
   AIEditResult,
   AIEditStep,
   AIEditTurn,
   AIEditGenerate,
   AIEditRunOptions,
-  AIEditingDeps,
 } from "./ai"

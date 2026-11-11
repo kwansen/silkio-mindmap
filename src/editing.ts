@@ -4,11 +4,8 @@ import type { SelectionCapability } from "@silker/core";
 import type { TextEditorCapability } from "@silker/core";
 import { makeTextCommand } from "./commands";
 import type { ActiveHighlight } from "./ActiveHighlight";
+import { ACTIVE_COLOR, EDITING_COLOR } from "./colors";
 import type { MindMapChangeType } from "./types";
-
-// 高亮环两态颜色：激活（未编辑）蓝色，编辑紫色
-export const ACTIVE_COLOR = "#3b82f6";
-export const EDITING_COLOR = "#a855f7";
 
 export interface ActivationDeps {
   app: App;

@@ -3,7 +3,6 @@ import type { HistoryCapability } from "@silker/core";
 import type { SelectionCapability } from "@silker/core";
 import type { ClipboardEntry } from "@silker/core";
 import { makeAddCommand, makeDeleteCommand, makePasteCommand } from "./commands";
-import type { MindEdge } from "./Edge";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";
 import type { MindMapChangeType, MindMapNode } from "./types";
@@ -45,7 +44,6 @@ export class NodeOperations {
       ? parent.children.length
       : parent.children.indexOf(text) + 1;
     const node = this.deps.model.createNode(text, style);
-    this.deps.model.nodeStyles.set(node, style);
     const edge = this.deps.model.createEdge(parent, node);
     // 新增节点命令：redo/undo 对称地增删子节点与连线（工厂统一形状，序列化载荷
     // node 定格完整子树数据、父级与连线按 id 引用）
@@ -72,18 +70,15 @@ export class NodeOperations {
       n.children.forEach(collect);
     };
     targets.forEach(collect);
-    // 删除前定格各目标的父级与位置，及起点或终点在子树内的待清理连线
+    // 删除前定格各目标的父级与位置（死连线由命令工厂在 redo 首帧按当时树状态
+    // 定格——exec 立即执行 redo，此刻树未变，两序等价，无需编译期重复计算）
     const captures = targets.map((node) => ({
       node,
       parent: node.parent as Text,
       index: (node.parent as Text).children.indexOf(node),
     }));
-    const dead = this.deps.model.edges.filter(
-      (e) => subtree.has(e.fromNode) || subtree.has(e.toNode),
-    );
-    // 删除命令（工厂统一形状）：多选目标合并为一条，undo 一次全回退；
-    // 死连线在编译期定格（此刻树未变，与 redo 时计算等价）
-    this.deps.history.exec(makeDeleteCommand(this.deps, captures, dead));
+    // 删除命令（工厂统一形状）：多选目标合并为一条，undo 一次全回退
+    this.deps.history.exec(makeDeleteCommand(this.deps, captures));
     // 清空选中态，重布局后激活存活的父节点（activate 会重建覆盖层，旧覆盖层随之卸载）
     this.deps.activation.deactivate();
     await this.deps.onRelayout();
@@ -145,20 +140,18 @@ export class NodeOperations {
     const parent = anchor;
     this.deps.model.expand(parent);
     // 插入位置在构造命令前定格：追加到子级末尾（统一走 index splice，
-    // undo/redo 重放同一索引，不依赖粘贴时的树状态）
+    // undo/redo 重放同一索引，不依赖粘贴时的树状态）。子树插入编排
+    // （渲染子树/收集内连线/建父子连线）走模型原语 buildSubtreeInsert，
+    // 与 AI add 共用同一份；粘贴前剥除 id：粘贴出的子树须是新节点
+    //（自动生成新 id），不与源子树共享 id
     const index = parent.children.length;
-    // 新节点级数 = 激活节点级数 + 1（按级数解析样式）；renderNode 递归还原子孙
-    // 与自定义样式/折叠态，子树内部连线在命令外定格创建
-    // （redo/undo 只做挂载/摘除，重复创建会导致连线翻倍且撤销残留）
-    const depth = this.deps.model.depthOf(parent) + 1;
-    const inserts = nodes.map((data, i) => {
-      // 粘贴前剥除 id：粘贴出的子树须是新节点（自动生成新 id），不与源子树共享 id
-      const node = this.deps.model.renderNode(this.deps.model.stripIds(data), depth);
-      const inner: MindEdge[] = [];
-      this.deps.model.collectEdges(node, inner);
-      const edge = this.deps.model.createEdge(parent, node);
-      return { parent, node, edge, inner, index: index + i };
-    });
+    const inserts = nodes.map((data, i) =>
+      this.deps.model.buildSubtreeInsert(
+        parent,
+        this.deps.model.stripIds(data),
+        index + i,
+      ),
+    );
     // 粘贴命令（工厂统一形状）：redo/undo 对称地增删子树节点、父子连线与子树内部连线
     this.deps.history.exec(makePasteCommand(this.deps, inserts));
     await this.deps.onRelayout();

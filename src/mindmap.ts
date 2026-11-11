@@ -27,6 +27,7 @@ import { NodeOperations } from "./operations";
 import { AIEditingController, AIEditingPlugin } from "./ai";
 import { KeyboardNav } from "./keyboard";
 import { DragInteractions } from "./drag";
+import type { MindEdge } from "./Edge";
 import type { EdgePayload, LayoutPayload } from "./history-payloads";
 import type {
   LayoutDirection,
@@ -338,10 +339,16 @@ export class MindMap {
     });
   }
 
+  // 交互忙判定（唯一谓词）：编辑会话中或拖拽进行中视为忙——撤销/重做/全选等
+  // 全局变更入口据此避让，避免与进行中的变更互踩（此前各入口重复手写同一对条件）
+  private get busy(): boolean {
+    return this.activation.editing || this.drag.dragState !== null;
+  }
+
   // 全选：全部可见节点进入多选态（高亮环 + 批量拖拽/删除/复制可用）。
   // 编辑态（mod+a 属输入框原生全选）或拖拽中不响应，避免与进行中的会话互踩
   selectAll() {
-    if (this.activation.editing || this.drag.dragState) return;
+    if (this.busy) return;
     if (!this.model.root) return;
     const all: Text[] = [];
     this.model.collectTexts(this.model.root, all);
@@ -364,7 +371,7 @@ export class MindMap {
   // 返回是否实际撤销了一条命令（无可撤销或被守卫拦截返回 false），AI 控制器据此
   // 区分"已撤销"与"没有可撤销"的步骤反馈
   async undo(): Promise<boolean> {
-    if (this.activation.editing || this.drag.dragState) return false;
+    if (this.busy) return false;
     const cmd = this.history.undo();
     if (!cmd) return false;
     this.activation.deactivate();
@@ -376,7 +383,7 @@ export class MindMap {
 
   // 重做：流程与 undo 对称，方向相反
   async redo(): Promise<boolean> {
-    if (this.activation.editing || this.drag.dragState) return false;
+    if (this.busy) return false;
     const cmd = this.history.redo();
     if (!cmd) return false;
     this.activation.deactivate();
@@ -525,9 +532,11 @@ export class MindMap {
     // destroy 可能先于异步布局完成：已拆卸则不再挂载任何节点
     if (this.destroyed) return;
     this.app.add(root);
-    // 收集所有父子连线并追加到根节点之后，保证连线绘制在节点上层
-    this.model.collectEdges(root, this.model.edges);
-    this.app.add(this.model.edges);
+    // 收集所有父子连线并经 mountEdges 原语挂载（模型连线表与场景连线层同一处维护），
+    // 追加到根节点之后保证连线绘制在节点上层
+    const edges: MindEdge[] = [];
+    this.model.collectEdges(root, edges);
+    this.model.mountEdges(edges);
     // 交互覆盖层注册为常驻顶层（按绘制次序：高亮环 → 拖拽反馈 → 折叠开关），
     // 之后新增节点/连线由 App 自动保持覆盖层置顶
     this.app.addOverlay(this.highlight);
@@ -595,7 +604,7 @@ export class MindMap {
     }
     this.commands.guard = null;
     if (this.model.root) this.app.remove(this.model.root);
-    this.app.remove(this.model.edges);
+    this.app.remove([...this.model.edges]);
     this.app.remove(this.highlight);
     this.app.remove(this.ghost);
     this.app.remove(this.collapseToggle);
