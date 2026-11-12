@@ -829,22 +829,7 @@ onUnmounted(() => {
         >
           <Redo class="block h-4 w-4 shrink-0" />
         </button>
-        <button
-          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-          title="适应视图"
-          aria-label="适应视图"
-          @click="fit"
-        >
-          <Fit class="block h-4 w-4 shrink-0" />
-        </button>
-        <button
-          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
-          title="居中"
-          aria-label="居中"
-          @click="center"
-        >
-          <Center class="block h-4 w-4 shrink-0" />
-        </button>
+        <span class="mx-0.5 h-4 w-px bg-gray-200"></span>
 
         <!-- 布局方向设置：横向（right）/ 左向（left）/ 双向平衡（both）/ 组织结构图（down） -->
         <div
@@ -909,6 +894,23 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+          title="适应视图"
+          aria-label="适应视图"
+          @click="fit"
+        >
+          <Fit class="block h-4 w-4 shrink-0" />
+        </button>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+          title="居中"
+          aria-label="居中"
+          @click="center"
+        >
+          <Center class="block h-4 w-4 shrink-0" />
+        </button>
+        <span class="mx-0.5 h-4 w-px bg-gray-200"></span>
 
         <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
         <div
