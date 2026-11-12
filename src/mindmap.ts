@@ -462,6 +462,18 @@ export class MindMap {
     return this.model.toJSON();
   }
 
+  // 适应视图：按整棵可见子树的世界包围盒拟合视口（缩放 + 居中）
+  fit() {
+    if (!this.model.root || !this.pan) return;
+    this.pan.fit(this.model.getBounds(this.model.root));
+  }
+
+  // 居中视图：保持当前缩放不变，仅平移视口使整棵子树包围盒中心对齐画布中心
+  center() {
+    if (!this.model.root || !this.pan) return;
+    this.pan.center(this.model.getBounds(this.model.root));
+  }
+
   // 设置布局方向（数据与场景实例保持不动）：同步更新门面/模型/各控制器的方向状态与
   // 拖拽反馈层朝向，翻转既有连线纵向标志后整体重布局。根节点锚定语义：布局器只写
   // 子节点相对坐标、从不移动根节点，这里也不调整视口——根节点在屏幕上的位置保持

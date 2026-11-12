@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 思维导图 Demo：canvas + 胶囊工具条（撤销/重做、布局方向、连线形状、缩放）+
+// 思维导图 Demo：canvas + 胶囊工具条（撤销/重做、适应视图/居中、布局方向、连线形状、缩放）+
 // 文档切换器（IndexedDB 持久化：新建/打开/自动保存/删除）
 import {
   computed,
@@ -41,6 +41,8 @@ import Sparkles from "../icons/Sparkles.vue";
 import Settings from "../icons/Settings.vue";
 import ArrowUp from "../icons/ArrowUp.vue";
 import Stop from "../icons/Stop.vue";
+import Fit from "../icons/Fit.vue";
+import Center from "../icons/Center.vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
 
@@ -489,6 +491,16 @@ async function redo() {
   syncToolbar();
 }
 
+// 适应视图：按整棵可见子树包围盒拟合视口；居中：保持缩放只平移。
+// 视口变化经 app.camera.onViewportChange 回流，缩放滑块自动同步
+function fit() {
+  mindmap?.fit();
+}
+
+function center() {
+  mindmap?.center();
+}
+
 // 缩放滑块：以画布中心为锚点缩放，范围与滚轮缩放一致（0.2–8）
 function onZoomInput(event: Event) {
   const scale = Number((event.target as HTMLInputElement).value) / 100;
@@ -816,6 +828,22 @@ onUnmounted(() => {
           @click="redo"
         >
           <Redo class="block h-4 w-4 shrink-0" />
+        </button>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+          title="适应视图"
+          aria-label="适应视图"
+          @click="fit"
+        >
+          <Fit class="block h-4 w-4 shrink-0" />
+        </button>
+        <button
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+          title="居中"
+          aria-label="居中"
+          @click="center"
+        >
+          <Center class="block h-4 w-4 shrink-0" />
         </button>
 
         <!-- 布局方向设置：横向（right）/ 左向（left）/ 双向平衡（both）/ 组织结构图（down） -->
