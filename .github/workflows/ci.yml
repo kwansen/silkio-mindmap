@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # 依赖 @silker/* 正式版本，必须等 silker 仓发布后才能装上。
+      # 首次拆分后先提交 pnpm-lock.yaml，再改为 --frozen-lockfile。
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check:deps
+      - run: pnpm build
+      - run: pnpm test
+      # - run: pnpm --dir examples/demo-mindmap build
