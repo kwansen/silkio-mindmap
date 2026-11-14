@@ -127,12 +127,14 @@ let aiAbort: AbortController | null = null;
 const aiSettingsOpen = ref(false);
 const chatBox = ref<HTMLDivElement | null>(null);
 
-// AI 服务配置（OpenAI 兼容接口，DeepSeek/通义/Kimi/OpenAI 等均适用），
-// 运行时在面板设置弹层里填写，持久化到 localStorage（不入代码仓库）
+// AI 服务配置（运行时在面板设置弹层里填写，持久化到 localStorage，不入代码仓库）。
+// format：openai = OpenAI Chat Completions 兼容接口（DeepSeek/通义/Kimi/OpenAI 等
+// 均适用）；anthropic = Anthropic Messages 原生格式
 interface AIConfig {
   baseURL: string;
   apiKey: string;
   model: string;
+  format: "openai" | "anthropic";
 }
 const AI_CONFIG_KEY = "mindmap-ai-config";
 const aiConfig = ref<AIConfig>(loadAIConfig());
@@ -159,10 +161,11 @@ function loadAIConfig(): AIConfig {
       baseURL: "",
       apiKey: "",
       model: "",
+      format: "openai",
       ...JSON.parse(localStorage.getItem(AI_CONFIG_KEY) ?? "{}"),
     };
   } catch {
-    return { baseURL: "", apiKey: "", model: "" };
+    return { baseURL: "", apiKey: "", model: "", format: "openai" };
   }
 }
 
@@ -171,32 +174,43 @@ function saveAIConfig() {
   aiSettingsOpen.value = false;
 }
 
-// 真实 AI 适配器：请求 OpenAI 兼容 chat/completions（流式），提示词用包内缺省
-// 模板（含操作 schema 与当前导图数据），返回文本交给 AIEditingController 解析
-// （自动容错 markdown 代码块包裹，target 缺省锚点/支持节点文本定位）。
-// 思考过程：delta 上的 reasoning_content / reasoning 字段（DeepSeek-R1、通义、
-// Kimi 等推理模型）逐段收集到进行中消息实时展示；非流式响应退回一次性读取。
+// 真实 AI 适配器：按配置的 API 格式分流。提示词用包内缺省模板（含操作 schema
+// 与当前导图数据），返回文本交给 AIEditingController 解析（自动容错 markdown
+// 代码块包裹，target 缺省锚点/支持节点文本定位）。
 // 注意：浏览器直连要求服务端允许 CORS，否则需经本地代理转发
 const realGenerate: AIEditGenerate = async (req) => {
-  const { baseURL, apiKey, model } = aiConfig.value;
+  const { baseURL, apiKey, model, format } = aiConfig.value;
   if (!baseURL || !apiKey || !model)
     throw new Error("请先点击右上角齿轮配置 AI 服务");
+  const prompt = defaultAIEditPrompt(req);
+  return format === "anthropic"
+    ? anthropicGenerate({ baseURL, apiKey, model }, prompt)
+    : openaiGenerate({ baseURL, apiKey, model }, prompt);
+};
+
+// OpenAI Chat Completions 兼容格式（默认）：请求 baseURL + /chat/completions（流式）。
+// 思考过程：delta 上的 reasoning_content / reasoning 字段（DeepSeek-R1、通义、
+// Kimi 等推理模型）逐段收集到进行中消息实时展示；非流式响应退回一次性读取
+async function openaiGenerate(
+  cfg: { baseURL: string; apiKey: string; model: string },
+  prompt: string,
+): Promise<string> {
   if (aiPending.value) {
     aiPending.value.reasoning = "";
     aiPending.value.content = "";
   }
   const ac = new AbortController();
   aiAbort = ac;
-  const res = await fetch(baseURL.replace(/\/+$/, "") + "/chat/completions", {
+  const res = await fetch(cfg.baseURL.replace(/\/+$/, "") + "/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${cfg.apiKey}`,
     },
     signal: ac.signal,
     body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: defaultAIEditPrompt(req) }],
+      model: cfg.model,
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
       stream: true,
     }),
@@ -251,7 +265,100 @@ const realGenerate: AIEditGenerate = async (req) => {
   }
   if (!content) throw new Error("AI 服务返回内容为空");
   return content;
-};
+}
+
+// Anthropic Messages 原生格式：baseURL 需含 /v1（如 https://api.anthropic.com/v1），
+// 端点为 baseURL + /messages；鉴权用 x-api-key + anthropic-version 头。
+// 浏览器直连官方 API 必须显式声明 anthropic-dangerous-direct-browser-access 才允许
+// CORS。扩展思考（thinking）要求固定 temperature=1 且按模型逐个开启，此处不默认
+// 发送——Anthropic 模式下思考过程为空，仅答案文本流式展示
+async function anthropicGenerate(
+  cfg: { baseURL: string; apiKey: string; model: string },
+  prompt: string,
+): Promise<string> {
+  if (aiPending.value) {
+    aiPending.value.reasoning = "";
+    aiPending.value.content = "";
+  }
+  const ac = new AbortController();
+  aiAbort = ac;
+  const res = await fetch(cfg.baseURL.replace(/\/+$/, "") + "/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": cfg.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    signal: ac.signal,
+    body: JSON.stringify({
+      model: cfg.model,
+      max_tokens: 8192,
+      temperature: 0.3,
+      messages: [{ role: "user", content: prompt }],
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `AI 服务请求失败（HTTP ${res.status}）${text ? `：${text.slice(0, 160)}` : ""}`,
+    );
+  }
+  // 非流式兜底：content 数组按块类型分离思考与答案
+  if (!res.body) {
+    const json = await res.json();
+    const blocks: Array<{ type: string; text?: string; thinking?: string }> =
+      json?.content ?? [];
+    if (aiPending.value) {
+      aiPending.value.reasoning = blocks
+        .filter((b) => b.type === "thinking")
+        .map((b) => b.thinking ?? "")
+        .join("");
+    }
+    const content = blocks
+      .filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
+      .join("");
+    if (!content) throw new Error("AI 服务返回内容为空");
+    if (aiPending.value) aiPending.value.content = content;
+    return content;
+  }
+  // SSE 流式解析：content_block_delta 事件按 delta.type 分离
+  // 思考（thinking_delta）与答案（text_delta）
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let content = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s.startsWith("data:")) continue;
+      const payload = s.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const event = JSON.parse(payload);
+        if (event?.type !== "content_block_delta" || !event.delta) continue;
+        const delta = event.delta;
+        if (delta.type === "thinking_delta" && delta.thinking && aiPending.value) {
+          aiPending.value.reasoning += delta.thinking;
+        } else if (delta.type === "text_delta" && delta.text) {
+          content += delta.text;
+          if (aiPending.value) aiPending.value.content = content;
+        }
+      } catch {
+        // 忽略无法解析的行（ping/心跳等）
+      }
+    }
+  }
+  if (!content) throw new Error("AI 服务返回内容为空");
+  return content;
+}
 
 // 流式内容是否为操作 JSON（编辑类指令的输出）：JSON 输出等控制器解析完成后以
 // 反馈链展示，不实时渲染原始 JSON；纯文本回答才走 comark 流式渲染
@@ -997,15 +1104,26 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- 服务配置（OpenAI 兼容接口，localStorage 持久化） -->
+      <!-- 服务配置（localStorage 持久化） -->
       <div
         v-if="aiSettingsOpen"
         class="flex flex-col gap-2 border-b border-gray-100 bg-gray-50 p-3"
       >
+        <select
+          v-model="aiConfig.format"
+          class="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-violet-400"
+        >
+          <option value="openai">OpenAI 兼容格式（chat/completions）</option>
+          <option value="anthropic">Anthropic 格式（messages）</option>
+        </select>
         <input
           v-model="aiConfig.baseURL"
           class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
-          placeholder="接口地址（含 /v1），如 https://api.deepseek.com/v1"
+          :placeholder="
+            aiConfig.format === 'anthropic'
+              ? '接口地址（含 /v1），如 https://api.anthropic.com/v1'
+              : '接口地址（含 /v1），如 https://api.deepseek.com/v1'
+          "
         />
         <input
           v-model="aiConfig.apiKey"
@@ -1016,7 +1134,11 @@ onUnmounted(() => {
         <input
           v-model="aiConfig.model"
           class="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-xs outline-none focus:border-violet-400"
-          placeholder="模型名，如 deepseek-chat"
+          :placeholder="
+            aiConfig.format === 'anthropic'
+              ? '模型名，如 claude-sonnet-4-5'
+              : '模型名，如 deepseek-chat'
+          "
         />
         <div class="flex items-center justify-between">
           <span class="text-[10px] text-gray-400"
