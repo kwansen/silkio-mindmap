@@ -1,5 +1,5 @@
-import { Node } from "@silker/core";
-import type { Text } from "@silker/core";
+import { Node } from "@silkor/core";
+import type { Text } from "@silkor/core";
 
 // 激活节点高亮环：渲染时实时读取目标节点包围盒描边，节点移动后无需重定位（元函数：跟随渲染）
 // 支持多目标：框选激活多个节点时逐个描边

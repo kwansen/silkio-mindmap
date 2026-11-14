@@ -10,8 +10,8 @@ import {
   watch,
   type Component,
 } from "vue";
-import { App, type EdgeShape } from "@silker/core";
-import { officialPlugins } from "@silker/preset";
+import { App, type EdgeShape } from "@silkor/core";
+import { officialPlugins } from "@silkor/preset";
 import {
   MindMap,
   defaultAIEditPrompt,
@@ -20,7 +20,7 @@ import {
   type AIEditTurn,
   type MindMapNode,
   type Style,
-} from "@silker/mindmap";
+} from "@silkor/mindmap";
 import { Markdown } from "@comark/vue";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import Undo from "../icons/Undo.vue";
@@ -144,7 +144,7 @@ const canRedo = ref(false);
 // 复制 JSON 成功后的短暂反馈
 const copied = ref(false);
 
-// ---- AI 编辑（@silker/mindmap AIEditingPlugin + OpenAI 兼容接口，对话式侧边栏）----
+// ---- AI 编辑（@silkor/mindmap AIEditingPlugin + OpenAI 兼容接口，对话式侧边栏）----
 // 聊天消息流：历史对话保留在内存，不随单次对话丢失
 interface AIChatMessage {
   id: number;
@@ -733,7 +733,7 @@ function formatTime(ts: number) {
 onMounted(async () => {
   const canvas = canvasRef.value!;
 
-  // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silker/preset），
+  // 显式装配：自建 App 并安装官方插件预设（集合与顺序的单一事实来源在 @silkor/preset），
   // MindMap 按能力键复用这些能力，只补齐自有的布局插件
   app = new App(canvas);
   for (const p of officialPlugins()) app.use(p);

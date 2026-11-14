@@ -1,4 +1,4 @@
-import type { App, HistoryCommand, Node, Text } from "@silker/core";
+import type { App, HistoryCommand, Node, Text } from "@silkor/core";
 import { invariant } from "./invariants";
 import type { MindEdge } from "./Edge";
 import type { MindTree } from "./model";

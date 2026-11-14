@@ -1,5 +1,5 @@
-import { capabilityKey } from "@silker/core";
-import type { Text } from "@silker/core";
+import { capabilityKey } from "@silkor/core";
+import type { Text } from "@silkor/core";
 import type { MindMapNode } from "./types";
 
 // AI 编辑领域协议：操作 DSL（LLM 输出的协议）+ 请求/结果契约 + 目标定位与

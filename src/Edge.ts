@@ -1,5 +1,5 @@
-import { Edge as BaseEdge } from "@silker/core"
-import type { Text } from "@silker/core"
+import { Edge as BaseEdge } from "@silkor/core"
+import type { Text } from "@silkor/core"
 
 // 计算节点一侧边缘中点的世界坐标：
 // 横向布局取左/右缘（right 为 true 取右缘，否则取左缘），

@@ -1,5 +1,5 @@
-import { Text } from "@silker/core";
-import type { Node } from "@silker/core";
+import { Text } from "@silkor/core";
+import type { Node } from "@silkor/core";
 import type { LayoutDirection } from "./types";
 
 // 落点判定间距上限（世界坐标）：相邻节点边缘间距在 0..DROP_RANGE 内视为候选（后期可能需要调整）

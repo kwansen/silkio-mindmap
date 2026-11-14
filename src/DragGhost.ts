@@ -1,6 +1,6 @@
-import { Node } from "@silker/core";
-import type { Text } from "@silker/core";
-import { Edge } from "@silker/core";
+import { Node } from "@silkor/core";
+import type { Text } from "@silkor/core";
+import { Edge } from "@silkor/core";
 
 // 拖拽视觉反馈层（渲染时实时读取状态，元函数：跟随渲染）：
 // - 原位虚影：由 ActiveHighlight 虚线暗蓝环 + 被拖节点文字转暗色承担（不用 opacity，避免多层父节点透明度叠加后不可见）

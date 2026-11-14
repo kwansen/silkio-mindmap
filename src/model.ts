@@ -1,5 +1,5 @@
-import { Text } from "@silker/core";
-import type { App, EdgeShape } from "@silker/core";
+import { Text } from "@silkor/core";
+import type { App, EdgeShape } from "@silkor/core";
 import { invariant } from "./invariants";
 import { MindMapEdge, MindPathEdge } from "./Edge";
 import type { MindEdge } from "./Edge";

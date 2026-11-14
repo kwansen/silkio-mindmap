@@ -1,8 +1,8 @@
 // IndexedDB 持久化：导图文档的存取（新建/打开/自动保存/删除）。
 // 单对象仓库 mindmaps，主键 id；记录内嵌完整数据树与布局/连线偏好，
 // 打开时可整场景还原（数据 + direction + edgeStyle）。
-import type { EdgeShape } from "@silker/core";
-import type { MindMapNode } from "@silker/mindmap";
+import type { EdgeShape } from "@silkor/core";
+import type { MindMapNode } from "@silkor/mindmap";
 
 export interface MindMapDoc {
   id: string;

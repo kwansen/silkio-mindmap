@@ -1,5 +1,5 @@
-import type { Node, Text } from "@silker/core";
-import type { SelectionCapability } from "@silker/core";
+import type { Node, Text } from "@silkor/core";
+import type { SelectionCapability } from "@silkor/core";
 import { TOGGLE_RADIUS, TOGGLE_GAP } from "./CollapseToggle";
 import type { MindTree } from "./model";
 import type { MindMapChangeType, LayoutDirectionRef } from "./types";

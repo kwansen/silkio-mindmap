@@ -4,8 +4,8 @@
 // 私有存储 _children/parent（children 为只读视图；text setter 内的 measure
 // 由 measureCtx 缺失自动跳过，不会触碰 DOM）。
 import { describe, expect, it } from "vitest";
-import { Text } from "@silker/core";
-import type { Node } from "@silker/core";
+import { Text } from "@silkor/core";
+import type { Node } from "@silkor/core";
 import { MindTree } from "../src/model";
 import type { MindEdge } from "../src/Edge";
 import { defaultStyle } from "../src/types";

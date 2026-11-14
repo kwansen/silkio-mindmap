@@ -5,8 +5,8 @@
 // Node.prototype，直接操作 _children）；MindTree.renderNode 在实例上替换为 stub 工厂
 //（codec 重建路径只消费结构引用，样式缓存不参与断言）。
 import { describe, expect, it } from "vitest";
-import { Text } from "@silker/core";
-import type { App, Node, SerializedCommand } from "@silker/core";
+import { Text } from "@silkor/core";
+import type { App, Node, SerializedCommand } from "@silkor/core";
 import { MindTree } from "../src/model";
 import {
   makeAddCommand,

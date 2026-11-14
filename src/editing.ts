@@ -1,7 +1,7 @@
-﻿﻿import type { App, Text } from "@silker/core";
-import type { HistoryCapability } from "@silker/core";
-import type { SelectionCapability } from "@silker/core";
-import type { TextEditorCapability } from "@silker/core";
+﻿﻿import type { App, Text } from "@silkor/core";
+import type { HistoryCapability } from "@silkor/core";
+import type { SelectionCapability } from "@silkor/core";
+import type { TextEditorCapability } from "@silkor/core";
 import { makeTextCommand } from "./commands";
 import type { ActiveHighlight } from "./ActiveHighlight";
 import { ACTIVE_COLOR, EDITING_COLOR } from "./colors";

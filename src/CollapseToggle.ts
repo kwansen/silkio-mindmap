@@ -1,4 +1,4 @@
-import { Node } from "@silker/core";
+import { Node } from "@silkor/core";
 
 // 开关圆半径与到节点边缘的间距（世界坐标单位，随视口缩放）
 export const TOGGLE_RADIUS = 9;

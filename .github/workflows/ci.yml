@@ -12,13 +12,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 12
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      # 依赖 @silker/* 正式版本，必须等 silker 仓发布后才能装上。
-      # 首次拆分后先提交 pnpm-lock.yaml，再改为 --frozen-lockfile。
+      # 依赖 @silkor/* 正式版本，从 npm 拉取（silkor 已发布 0.1.0）。
+      # 首次安装会生成 pnpm-lock.yaml，提交后改为 --frozen-lockfile。
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm check:deps
       - run: pnpm build

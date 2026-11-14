@@ -1,7 +1,7 @@
-import type { App, Node, Text } from "@silker/core";
-import type { HistoryCapability } from "@silker/core";
-import type { SelectionCapability } from "@silker/core";
-import type { ClipboardEntry } from "@silker/core";
+import type { App, Node, Text } from "@silkor/core";
+import type { HistoryCapability } from "@silkor/core";
+import type { SelectionCapability } from "@silkor/core";
+import type { ClipboardEntry } from "@silkor/core";
 import { makeAddCommand, makeDeleteCommand, makePasteCommand } from "./commands";
 import type { ActivationController } from "./editing";
 import type { MindTree } from "./model";
@@ -111,7 +111,7 @@ export class NodeOperations {
     const payload = roots.map((n) => this.deps.model.serializeNode(n));
     // text 通道输出层级大纲文本：顶层无缩进，子孙按深度叠加 Tab——粘贴到飞书等
     // 大纲类应用即还原树形层级（与 parseTextTree 解析规则互逆）；html 通道渲染
-    // 嵌套 ul/li 大纲列表（机制层只包 data-silker 信封，大纲格式是本场景的
+    // 嵌套 ul/li 大纲列表（机制层只包 data-silkor 信封，大纲格式是本场景的
     // 文本领域知识，不走 Clipboard.ts）
     const text = toOutlineText(payload).join("\n");
     return {

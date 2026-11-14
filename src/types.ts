@@ -1,5 +1,5 @@
-import type { App, Plugin } from "@silker/core";
-import type { EdgeShape } from "@silker/core";
+import type { App, Plugin } from "@silkor/core";
+import type { EdgeShape } from "@silkor/core";
 import type { AIEditGenerate } from "./ai";
 
 export interface Style {
@@ -49,7 +49,7 @@ export const defaultStyle: Style = {
 export interface MindMapOptions {
   // 显式装配（starter-kit 模式）：传入宿主自建的 App（要求已安装官方外部插件
   // History/Command/Viewport/Pointer/Clicker/Exporter/TextEditor/Selection，
-  // 通常经 @silker/preset 的 officialPlugins()，实现均可按契约替换），
+  // 通常经 @silkor/preset 的 officialPlugins()，实现均可按契约替换），
   // MindMap 复用之并只补齐自有插件；场景包不依赖 preset，缺失能力由 require 兜底报错
   app: App;
   data: MindMapNode;

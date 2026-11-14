@@ -1,4 +1,4 @@
-import type { EdgeShape } from "@silker/core";
+import type { EdgeShape } from "@silkor/core";
 import type { LayoutDirection, MindMapNode, Style } from "./types";
 
 // 历史命令序列化载荷的单一类型源：commands.ts（生产端 toJSON）、history-codec.ts

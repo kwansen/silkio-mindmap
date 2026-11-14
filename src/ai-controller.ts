@@ -1,15 +1,15 @@
-import { compose } from "@silker/core";
+import { compose } from "@silkor/core";
 import type {
   App,
   HistoryCommand,
   Plugin,
   SerializedCommand,
   Text,
-} from "@silker/core";
+} from "@silkor/core";
 import type {
   HistoryCapability,
   SelectionCapability,
-} from "@silker/core";
+} from "@silkor/core";
 import type { MindEdge } from "./Edge";
 import {
   makeDeleteCommand,
@@ -630,7 +630,7 @@ export class AIEditingPlugin implements Plugin {
   install(app: App) {
     app.provide(AI_EDITING_CAPABILITY, this.controller, {
       version: "1.0.0",
-      provider: "@silker/mindmap/ai",
+      provider: "@silkor/mindmap/ai",
     });
   }
 }

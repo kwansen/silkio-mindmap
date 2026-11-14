@@ -1,9 +1,9 @@
-import { App, EdgePan, Text } from "@silker/core";
-import type { Node } from "@silker/core";
-import type { ViewportCapability } from "@silker/core";
-import type { HistoryCapability } from "@silker/core";
-import { POINTER_CAPABILITY } from "@silker/core";
-import type { SelectionCapability } from "@silker/core";
+import { App, EdgePan, Text } from "@silkor/core";
+import type { Node } from "@silkor/core";
+import type { ViewportCapability } from "@silkor/core";
+import type { HistoryCapability } from "@silkor/core";
+import { POINTER_CAPABILITY } from "@silkor/core";
+import type { SelectionCapability } from "@silkor/core";
 import { DragGhost } from "./DragGhost";
 import { makeMoveCommand } from "./commands";
 import { invariant } from "./invariants";

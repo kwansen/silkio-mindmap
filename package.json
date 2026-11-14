@@ -1,6 +1,6 @@
 {
-  "name": "@silker/mindmap",
-  "version": "1.0.0",
+  "name": "@silkor/mindmap",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,7 +17,7 @@
     "check:deps": "node scripts/check-deps.mjs"
   },
   "dependencies": {
-    "@silker/core": "^1.0.0"
+    "@silkor/core": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

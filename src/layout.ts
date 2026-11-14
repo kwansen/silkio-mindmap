@@ -1,4 +1,4 @@
-import type { App, Node, Plugin, Text } from "@silker/core"
+import type { App, Node, Plugin, Text } from "@silkor/core"
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout"
 import type { AutoLayoutCapability, AutoLayoutOptions } from "./auto-layout"
 

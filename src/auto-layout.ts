@@ -1,5 +1,5 @@
-import { capabilityKey } from "@silker/core"
-import type { Node } from "@silker/core"
+import { capabilityKey } from "@silkor/core"
+import type { Node } from "@silkor/core"
 
 // 自动布局能力：契约由 mindmap（Domain Core）定义，官方实现是 BuiltinTreeLayout
 // 插件（install 时自注册），第三方布局插件按能力键注册同名能力覆盖官方实现

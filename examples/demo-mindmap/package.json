@@ -11,9 +11,9 @@
   "dependencies": {
     "@astrojs/vue": "^5.0.0",
     "@comark/vue": "^0.9.0",
-    "@silker/core": "^1.0.0",
-    "@silker/mindmap": "workspace:*",
-    "@silker/preset": "^1.0.0",
+    "@silkor/core": "^0.1.0",
+    "@silkor/mindmap": "workspace:*",
+    "@silkor/preset": "^0.1.0",
     "@tailwindcss/vite": "^4.3.5",
     "astro": "^5.0.0",
     "comark": "^0.9.0",

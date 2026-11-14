@@ -1,7 +1,7 @@
 // 树形布局回归测试：layout() 的纵向堆叠、垂直居中、方向镜像与折叠语义。
 // Node 为抽象类，测试用空子类构造节点（layout 只读写几何字段，不触碰渲染）。
 import { describe, expect, it } from "vitest";
-import { Node } from "@silker/core";
+import { Node } from "@silkor/core";
 import { layout } from "../src/layout";
 
 class T extends Node {}

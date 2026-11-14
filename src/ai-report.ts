@@ -1,4 +1,4 @@
-import type { SerializedCommand } from "@silker/core";
+import type { SerializedCommand } from "@silkor/core";
 import type { MindTree } from "./model";
 import type {
   AddPayload,

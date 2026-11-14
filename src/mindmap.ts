@@ -1,18 +1,18 @@
-import { App, Text, VIEWPORT_CAPABILITY } from "@silker/core";
-import type { EdgeShape } from "@silker/core";
+import { App, Text, VIEWPORT_CAPABILITY } from "@silkor/core";
+import type { EdgeShape } from "@silkor/core";
 import type {
   CommandCapability,
   ExportOptions,
   HistoryCapability,
   HistorySnapshot,
   Plugin,
-} from "@silker/core";
-import type { SelectionCapability, TextEditorCapability, ViewportCapability } from "@silker/core";
-import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silker/core";
-import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silker/core";
-import { CANVAS_CLICK_CAPABILITY } from "@silker/core";
-import { CLIPBOARD_CAPABILITY } from "@silker/core";
-import type { ClipboardCapability } from "@silker/core";
+} from "@silkor/core";
+import type { SelectionCapability, TextEditorCapability, ViewportCapability } from "@silkor/core";
+import { selectionCapabilityKey, HISTORY_CAPABILITY, TEXT_EDITOR_CAPABILITY } from "@silkor/core";
+import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silkor/core";
+import { CANVAS_CLICK_CAPABILITY } from "@silkor/core";
+import { CLIPBOARD_CAPABILITY } from "@silkor/core";
+import type { ClipboardCapability } from "@silkor/core";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -61,7 +61,7 @@ export class MindMap {
   // 数据变化回调（构造时从 options 记录）
   private onChange?: (type: MindMapChangeType) => void;
   // 命令模式历史记录：各变更入口把"改树"抽成可逆命令入栈，undo/redo 时重放/逆放。
-  // 实现在 @silker/plugin-history，构造器内安装插件后按能力键消费
+  // 实现在 @silkor/plugin-history，构造器内安装插件后按能力键消费
   private history!: HistoryCapability;
   // 自动布局能力（BuiltinTreeLayout 插件 install 时注册，第三方布局插件可同名覆盖）：
   // 各结构变更路径经 relayout 按能力键消费，注册表缺失属于装配错误（require 兜底）
@@ -111,7 +111,7 @@ export class MindMap {
     this.siblingGap = options.siblingGap ?? 12;
     this.onChange = options.onChange;
     // 显式装配（starter-kit 模式）：宿主自建 App 并装配官方外部插件（通常用
-    // @silker/preset 的 officialPlugins()，实现均可按契约替换），本场景只补齐
+    // @silkor/preset 的 officialPlugins()，实现均可按契约替换），本场景只补齐
     // 自有插件（BuiltinTreeLayout 等）并接线场景回调；
     // 场景包不依赖 preset，装配缺口由下方 require 兜底报错
     this.app = options.app;

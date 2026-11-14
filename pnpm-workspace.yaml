@@ -1,3 +1,18 @@
 packages:
   - "."
   - examples/*
+# 依赖 @silkor/* 的 npm 正式版本；demo 的 astro 构建需要放行这两个安装脚本。
+allowBuilds:
+  esbuild: true
+  sharp: true
+minimumReleaseAgeExclude:
+  - '@silkor/core@0.1.0'
+  - '@silkor/plugin-clipboard@0.1.0'
+  - '@silkor/plugin-command@0.1.0'
+  - '@silkor/plugin-exporter@0.1.0'
+  - '@silkor/plugin-history@0.1.0'
+  - '@silkor/plugin-interaction@0.1.0'
+  - '@silkor/plugin-selection@0.1.0'
+  - '@silkor/plugin-text-editor@0.1.0'
+  - '@silkor/plugin-viewport@0.1.0'
+  - '@silkor/preset@0.1.0'

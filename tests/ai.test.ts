@@ -1,7 +1,7 @@
 // AI 目标定位测试：路径定位、序号消歧、多同名歧义、批内候选合并。
 // 定位纯函数只消费 text/children/parent/id，用最小桩对象即可（免 DOM 依赖）。
 import { describe, expect, it } from "vitest";
-import type { Text } from "@silker/core";
+import type { Text } from "@silkor/core";
 import {
   AIEditingController,
   collectTargetCandidates,

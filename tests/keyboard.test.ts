@@ -3,7 +3,7 @@
 // 覆写 getWorldPoint 避免触发 DOMMatrix）；KeyboardNav 的依赖经结构化接口声明，
 // 测试直接以假对象注入（模型/激活控制器的最小 stub）。
 import { describe, expect, it } from "vitest";
-import { Text } from "@silker/core";
+import { Text } from "@silkor/core";
 import { KeyboardNav } from "../src/keyboard";
 import type { KeyboardNavDeps } from "../src/keyboard";
 

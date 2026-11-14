@@ -1,5 +1,5 @@
-import type { Text } from "@silker/core";
-import type { SelectionCapability } from "@silker/core";
+import type { Text } from "@silkor/core";
+import type { SelectionCapability } from "@silkor/core";
 import type { ActivationController } from "./editing";
 import type { CollapseController } from "./collapse";
 import type { NodeOperations } from "./operations";

@@ -3,8 +3,8 @@
 // Object.create(Text.prototype) 绕过构造器（dropTarget 的 instanceof Text 判定成立），
 // 手动铺几何/可见性字段并覆写 getWorldPoint（避免触发 DOMMatrix 世界矩阵计算）。
 import { describe, expect, it } from "vitest";
-import { Text } from "@silker/core";
-import type { Node } from "@silker/core";
+import { Text } from "@silkor/core";
+import type { Node } from "@silkor/core";
 import { dropIndex, dropTarget } from "../src/drop";
 
 type FT = Text & {
