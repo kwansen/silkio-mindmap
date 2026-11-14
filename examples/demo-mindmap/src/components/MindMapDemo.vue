@@ -85,33 +85,11 @@ const levelStyles: Style[] = [
 
 // 用户数据：节点上的 style 可覆盖级数配置，缺省时按级数取 levelStyles
 const data = {
-  text: "中心主题",
+  text: "三角形",
   children: [
-    {
-      text: "前端",
-      children: [
-        { text: "React", children: [] },
-        { text: "Vue", children: [] },
-      ],
-    },
-    {
-      text: "后端",
-      children: [
-        { text: "Node.js", children: [] },
-        { text: "数据库", children: [{ text: "MySQL", children: [] }] },
-      ],
-    },
-    {
-      text: "运维",
-      children: [
-        { text: "Docker", children: [] },
-        { text: "K8s", children: [] },
-      ],
-    },
-    {
-      text: "测试",
-      children: [{ text: "Vitest", children: [] }],
-    },
+    { text: "锐角三角形", children: [] },
+    { text: "直角三角形", children: [] },
+    { text: "钝角三角形", children: [] },
   ],
 };
 
