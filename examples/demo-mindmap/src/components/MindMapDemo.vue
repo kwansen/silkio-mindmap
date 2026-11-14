@@ -8,7 +8,6 @@ import {
   onUnmounted,
   ref,
   watch,
-  type Component,
 } from "vue";
 import { App, type EdgeShape } from "@silkor/core";
 import { officialPlugins } from "@silkor/preset";
@@ -23,26 +22,8 @@ import {
 } from "silkio-mindmap";
 import { Markdown } from "@comark/vue";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
-import Undo from "../icons/Undo.vue";
-import Redo from "../icons/Redo.vue";
-import LayoutRight from "../icons/LayoutRight.vue";
-import LayoutLeft from "../icons/LayoutLeft.vue";
-import LayoutBoth from "../icons/LayoutBoth.vue";
-import LayoutDown from "../icons/LayoutDown.vue";
-import EdgeBezier from "../icons/EdgeBezier.vue";
-import EdgePath from "../icons/EdgePath.vue";
-import EdgeRPath from "../icons/EdgeRPath.vue";
-import Export from "../icons/Export.vue";
-import File from "../icons/File.vue";
-import Plus from "../icons/Plus.vue";
-import Trash from "../icons/Trash.vue";
-import Chevron from "../icons/Chevron.vue";
-import Sparkles from "../icons/Sparkles.vue";
-import Settings from "../icons/Settings.vue";
-import ArrowUp from "../icons/ArrowUp.vue";
-import Stop from "../icons/Stop.vue";
-import Fit from "../icons/Fit.vue";
-import Center from "../icons/Center.vue";
+import IconSprites from "./IconSprites.vue";
+import Icon from "./Icon.vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
 
@@ -422,18 +403,18 @@ const edgeOptions: { value: EdgeShape; short: string; title: string }[] = [
   { value: "rPath", short: "圆角折线", title: "圆角折线" },
 ];
 
-// value → 图标组件映射：触发器与下拉菜单复用同一套图标
-const layoutIcons: Record<LayoutDirection, Component> = {
-  right: LayoutRight,
-  left: LayoutLeft,
-  both: LayoutBoth,
-  down: LayoutDown,
+// value → 图标 symbol 映射：触发器与下拉菜单复用同一套图标
+const layoutIcons: Record<LayoutDirection, string> = {
+  right: "i-layout-right",
+  left: "i-layout-left",
+  both: "i-layout-both",
+  down: "i-layout-down",
 };
 
-const edgeIcons: Record<EdgeShape, Component> = {
-  bezier: EdgeBezier,
-  path: EdgePath,
-  rPath: EdgeRPath,
+const edgeIcons: Record<EdgeShape, string> = {
+  bezier: "i-edge-bezier",
+  path: "i-edge-path",
+  rPath: "i-edge-rpath",
 };
 
 // 非 响应式实例：App/MindMap 内部状态复杂，不做深度代理，UI 状态经上面的 ref 单向同步。
@@ -776,6 +757,8 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- 图标精灵表（隐藏挂载一次，全组件按 name 引用 symbol） -->
+  <IconSprites />
   <!-- 整体布局：画布区（flex-1）与 AI 侧边栏并列，侧边栏为布局元素而非悬浮层 -->
   <div class="flex h-screen w-screen overflow-hidden">
     <!-- 画布区：悬浮控件锚定于此容器，宽度随侧边栏开合自动伸缩 -->
@@ -791,11 +774,11 @@ onUnmounted(() => {
           title="导图列表"
           @click="docsOpen = true"
         >
-          <File class="h-4 w-4 shrink-0 text-gray-500" />
+          <Icon name="i-file" class="h-4 w-4 text-gray-500" />
           <span class="max-w-40 truncate text-xs text-gray-800">
             {{ docName || "未命名标题" }}
           </span>
-          <Chevron class="h-3 w-3 shrink-0 text-gray-400" />
+          <Icon name="i-chevron-down" class="h-3 w-3 text-gray-400" />
         </button>
         <button
           class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-gray-800 hover:bg-gray-100"
@@ -803,7 +786,7 @@ onUnmounted(() => {
           aria-label="新建导图"
           @click="createNew()"
         >
-          <Plus class="h-4 w-4 shrink-0" />
+          <Icon name="i-plus" class="h-4 w-4" />
         </button>
       </div>
 
@@ -818,7 +801,7 @@ onUnmounted(() => {
           aria-label="撤销"
           @click="undo"
         >
-          <Undo class="block h-4 w-4 shrink-0" />
+          <Icon name="i-undo" class="block h-4 w-4" />
         </button>
         <button
           class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
@@ -827,7 +810,7 @@ onUnmounted(() => {
           aria-label="重做"
           @click="redo"
         >
-          <Redo class="block h-4 w-4 shrink-0" />
+          <Icon name="i-redo" class="block h-4 w-4" />
         </button>
         <span class="mx-0.5 h-4 w-px bg-gray-200"></span>
 
@@ -841,10 +824,7 @@ onUnmounted(() => {
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="布局方向"
           >
-            <component
-              :is="layoutIcons[layout]"
-              class="block h-4 w-4 shrink-0"
-            />
+            <Icon :name="layoutIcons[layout]" class="block h-4 w-4" />
           </button>
           <div
             class="absolute top-[calc(100%+10px)] right-0 z-20 flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
@@ -858,10 +838,7 @@ onUnmounted(() => {
               :title="opt.title"
               @click="pickLayout(opt.value)"
             >
-              <component
-                :is="layoutIcons[opt.value]"
-                class="h-9 w-9 shrink-0"
-              />
+              <Icon :name="layoutIcons[opt.value]" class="h-9 w-9" />
             </button>
           </div>
         </div>
@@ -876,7 +853,7 @@ onUnmounted(() => {
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="连线形状"
           >
-            <component :is="edgeIcons[edge]" class="block h-4 w-4 shrink-0" />
+            <Icon :name="edgeIcons[edge]" class="block h-4 w-4" />
           </button>
           <div
             class="absolute top-[calc(100%+10px)] right-0 z-20 flex-col items-center gap-0.5 rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
@@ -890,7 +867,7 @@ onUnmounted(() => {
               :title="opt.title"
               @click="pickEdge(opt.value)"
             >
-              <component :is="edgeIcons[opt.value]" class="h-9 w-9 shrink-0" />
+              <Icon :name="edgeIcons[opt.value]" class="h-9 w-9" />
             </button>
           </div>
         </div>
@@ -900,7 +877,7 @@ onUnmounted(() => {
           aria-label="适应视图"
           @click="fit"
         >
-          <Fit class="block h-4 w-4 shrink-0" />
+          <Icon name="i-fit" class="block h-4 w-4" />
         </button>
         <button
           class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
@@ -908,7 +885,7 @@ onUnmounted(() => {
           aria-label="居中"
           @click="center"
         >
-          <Center class="block h-4 w-4 shrink-0" />
+          <Icon name="i-center" class="block h-4 w-4" />
         </button>
         <span class="mx-0.5 h-4 w-px bg-gray-200"></span>
 
@@ -922,7 +899,7 @@ onUnmounted(() => {
             class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
             title="导出"
           >
-            <Export class="block h-4 w-4 shrink-0" />
+            <Icon name="i-export" class="block h-4 w-4" />
           </button>
           <div
             class="absolute top-[calc(100%+10px)] right-0 z-20 min-w-28 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
@@ -991,7 +968,7 @@ onUnmounted(() => {
           title="AI 助手"
           @click="aiSidebarOpen = !aiSidebarOpen"
         >
-          <Sparkles class="block h-4 w-4 shrink-0" />
+          <Icon name="i-sparkles" class="block h-4 w-4" />
         </button>
       </div>
     </div>
@@ -1003,7 +980,7 @@ onUnmounted(() => {
     >
       <!-- 头部 -->
       <div class="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
-        <Sparkles class="h-4 w-4 text-violet-500" />
+        <Icon name="i-sparkles" class="h-4 w-4 text-violet-500" />
         <span class="flex-1 text-sm font-medium text-gray-800">AI 助手</span>
         <button
           class="cursor-pointer text-xs text-gray-400 hover:text-gray-600"
@@ -1018,14 +995,14 @@ onUnmounted(() => {
           title="AI 服务配置"
           @click="aiSettingsOpen = !aiSettingsOpen"
         >
-          <Settings class="h-4 w-4" />
+          <Icon name="i-settings" class="h-4 w-4" />
         </button>
         <button
           class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
           title="收起"
           @click="aiSidebarOpen = false"
         >
-          <Chevron class="h-4 w-4" />
+          <Icon name="i-chevron-down" class="h-4 w-4" />
         </button>
       </div>
 
@@ -1174,7 +1151,7 @@ onUnmounted(() => {
             v-else-if="!aiPending.reasoning"
             class="flex items-center gap-1.5 text-xs text-gray-400"
           >
-            <Sparkles class="h-3.5 w-3.5 animate-pulse text-violet-400" />
+            <Icon name="i-sparkles" class="h-3.5 w-3.5 animate-pulse text-violet-400" />
             {{ isOpsStream(aiPending.content) ? "执行操作中…" : "思考中…" }}
           </div>
         </div>
@@ -1199,8 +1176,8 @@ onUnmounted(() => {
           :aria-label="aiBusy ? '停止生成' : '发送'"
           @click="aiBusy ? stopAi() : sendAi()"
         >
-          <Stop v-if="aiBusy" class="h-3.5 w-3.5" />
-          <ArrowUp v-else class="h-4 w-4" />
+          <Icon v-if="aiBusy" name="i-stop" class="h-3.5 w-3.5" />
+          <Icon v-else name="i-arrow-up" class="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -1251,7 +1228,7 @@ onUnmounted(() => {
             :class="{ 'bg-[#ede9fe]': d.id === currentId }"
             @click="openDoc(d.id)"
           >
-            <File class="h-4 w-4 shrink-0 text-gray-400" />
+            <Icon name="i-file" class="h-4 w-4 text-gray-400" />
             <div class="min-w-0 flex-1">
               <div
                 class="truncate text-xs"
@@ -1273,7 +1250,7 @@ onUnmounted(() => {
               title="删除"
               @click.stop="removeDoc(d.id)"
             >
-              <Trash class="h-3.5 w-3.5" />
+              <Icon name="i-trash" class="h-3.5 w-3.5" />
             </button>
           </div>
           <div
