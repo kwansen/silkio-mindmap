@@ -39,7 +39,7 @@ jobs:
         uses: changesets/action@v1
         with:
           version: pnpm exec changeset version
-          publish: pnpm --filter silkio-mindmap build && pnpm --filter silkio-mindmap publish --access public --no-git-checks
+          publish: pnpm --filter silkio-mindmap publish --access public --no-git-checks
           commit: 'chore(release): version packages'
           title: 'chore(release): version packages'
         env:
