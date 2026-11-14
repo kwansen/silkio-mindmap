@@ -1298,82 +1298,149 @@ onUnmounted(() => {
 
   <!-- 文档 dialog：遮罩点击关闭，列表按创建/更新时间排序，点击条目打开导图 -->
   <Teleport to="body">
-    <div
-      v-if="docsOpen"
-      class="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4"
-      @click.self="docsOpen = false"
-    >
+    <Transition name="dialog">
       <div
-        class="flex max-h-[70vh] w-80 flex-col rounded-xl bg-white p-4 shadow-[0_8px_32px_rgba(0,0,0,0.2)]"
-        role="dialog"
-        aria-label="导图列表"
+        v-if="docsOpen"
+        class="fixed inset-0 z-30 flex items-center justify-center bg-gray-900/30 p-4 backdrop-blur-[2px]"
+        @click.self="docsOpen = false"
       >
-        <div class="mb-3 flex items-center gap-2">
-          <span class="flex-1 text-sm font-medium text-gray-800">我的导图</span>
-        </div>
-
-        <!-- 排序：创建时间 / 更新时间，点击切换升降序 -->
-        <div class="mb-2 flex items-center gap-2">
-          <button
-            v-for="key in ['createdAt', 'updatedAt'] as const"
-            :key="key"
-            class="flex h-6 cursor-pointer items-center gap-0.5 rounded-md px-2 text-[11px]"
-            :class="
-              sortKey === key
-                ? 'bg-[#ede9fe] font-medium text-violet-700'
-                : 'text-gray-500 hover:bg-gray-100'
-            "
-            @click="sortKey === key ? (sortAsc = !sortAsc) : (sortKey = key)"
-          >
-            {{ key === "createdAt" ? "创建时间" : "更新时间" }}
-            <span v-if="sortKey === key" class="text-[9px]">{{
-              sortAsc ? "↑" : "↓"
-            }}</span>
-          </button>
-        </div>
-
-        <!-- 导图列表 -->
-        <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+        <div
+          class="dialog-panel flex max-h-[70vh] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-[0_16px_48px_rgba(0,0,0,0.18)] ring-1 ring-black/5"
+          role="dialog"
+          aria-label="导图列表"
+        >
+          <!-- 头部：标题 + 数量徽标 + 关闭 -->
           <div
-            v-for="d in sortedDocs"
-            :key="d.id"
-            class="group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
-            :class="{ 'bg-[#ede9fe]': d.id === currentId }"
-            @click="openDoc(d.id)"
+            class="flex items-center gap-2 border-b border-gray-100 px-5 py-3.5"
           >
-            <Icon name="i-file" class="h-4 w-4 text-gray-400" />
-            <div class="min-w-0 flex-1">
-              <div
-                class="truncate text-xs"
-                :class="
-                  d.id === currentId
-                    ? 'font-medium text-violet-700'
-                    : 'text-gray-800'
-                "
-              >
-                {{ d.name }}
-              </div>
-              <div class="text-[10px] text-gray-400">
-                创建于 {{ formatTime(d.createdAt) }} · 更新于
-                {{ formatTime(d.updatedAt) }}
-              </div>
-            </div>
-            <button
-              class="hidden h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-gray-400 hover:text-red-500 group-hover/row:flex"
-              title="删除"
-              @click.stop="removeDoc(d.id)"
+            <span class="text-sm font-semibold text-gray-900">我的导图</span>
+            <span
+              class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] leading-4 text-gray-500"
             >
-              <Icon name="i-trash" class="h-3.5 w-3.5" />
+              {{ sortedDocs.length }}
+            </span>
+            <button
+              class="ml-auto flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              title="关闭"
+              aria-label="关闭"
+              @click="docsOpen = false"
+            >
+              <Icon name="i-close" class="h-3.5 w-3.5" />
             </button>
           </div>
+
+          <!-- 排序：分段控件，点击切换升降序 -->
+          <div class="px-4 pt-3">
+            <div class="inline-flex items-center rounded-lg bg-gray-100 p-0.5">
+              <button
+                v-for="key in ['createdAt', 'updatedAt'] as const"
+                :key="key"
+                class="flex h-6 cursor-pointer items-center gap-1 rounded-md px-2.5 text-[11px] transition-all"
+                :class="
+                  sortKey === key
+                    ? 'bg-white font-medium text-gray-800 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                "
+                @click="sortKey === key ? (sortAsc = !sortAsc) : (sortKey = key)"
+              >
+                {{ key === "createdAt" ? "创建时间" : "更新时间" }}
+                <span v-if="sortKey === key" class="text-[9px]">{{
+                  sortAsc ? "↑" : "↓"
+                }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 导图列表 -->
           <div
-            v-if="!sortedDocs.length"
-            class="py-8 text-center text-xs text-gray-400"
+            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2.5 py-2.5"
           >
-            还没有导图，点击左上角「+」新建
+            <div
+              v-for="d in sortedDocs"
+              :key="d.id"
+              class="group/row flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition-colors"
+              :class="
+                d.id === currentId
+                  ? 'bg-violet-50 ring-1 ring-violet-100'
+                  : 'hover:bg-gray-50'
+              "
+              @click="openDoc(d.id)"
+            >
+              <span
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                :class="
+                  d.id === currentId
+                    ? 'bg-violet-100 text-violet-600'
+                    : 'bg-gray-100 text-gray-400'
+                "
+              >
+                <Icon name="i-file" class="h-4 w-4" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <div
+                  class="truncate text-[13px] font-medium"
+                  :class="
+                    d.id === currentId
+                      ? 'text-violet-700'
+                      : 'text-gray-800'
+                  "
+                >
+                  {{ d.name }}
+                </div>
+                <div class="text-[11px] text-gray-400">
+                  更新于 {{ formatTime(d.updatedAt) }}
+                </div>
+              </div>
+              <button
+                class="hidden h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 group-hover/row:flex"
+                title="删除"
+                aria-label="删除"
+                @click.stop="removeDoc(d.id)"
+              >
+                <Icon name="i-trash" class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div v-if="!sortedDocs.length" class="py-10 text-center">
+              <Icon name="i-file" class="mx-auto mb-2 h-8 w-8 text-gray-200" />
+              <div class="text-xs text-gray-400">还没有导图，点击下方按钮新建</div>
+            </div>
+          </div>
+
+          <!-- 底部：新建 -->
+          <div class="border-t border-gray-100 p-3">
+            <button
+              class="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-violet-500 text-xs font-medium text-white transition-colors hover:bg-violet-600"
+              @click="createNew()"
+            >
+              <Icon name="i-plus" class="h-3.5 w-3.5" />
+              新建导图
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+/* dialog 进出场：遮罩淡入淡出，面板上浮缩放 */
+.dialog-enter-active,
+.dialog-leave-active {
+  transition: opacity 0.2s ease;
+}
+.dialog-enter-active .dialog-panel,
+.dialog-leave-active .dialog-panel {
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+.dialog-enter-from,
+.dialog-leave-to {
+  opacity: 0;
+}
+.dialog-enter-from .dialog-panel,
+.dialog-leave-to .dialog-panel {
+  transform: translateY(8px) scale(0.97);
+  opacity: 0;
+}
+</style>

@@ -107,6 +107,12 @@
       <rect x="7" y="7" width="10" height="10" rx="1.5" />
     </symbol>
 
+    <!-- 关闭 -->
+    <symbol id="i-close" viewBox="0 0 24 24" stroke-width="1.5">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </symbol>
+
     <!-- 文档删除 -->
     <symbol id="i-trash" viewBox="0 0 24 24" stroke-width="1">
       <polyline points="3 6 5 6 21 6" />
