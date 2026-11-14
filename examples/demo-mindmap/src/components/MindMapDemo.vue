@@ -460,22 +460,34 @@ function center() {
   mindmap?.center();
 }
 
-// 缩放滑块：以画布中心为锚点缩放，范围与滚轮缩放一致（0.2–8）
-function onZoomInput(event: Event) {
-  const scale = Number((event.target as HTMLInputElement).value) / 100;
-  zoom.value = Math.round(scale * 100);
+// 以画布中心为锚点设置缩放（与缩放滑块同一世界锚点换算）
+function setZoom(scale: number) {
   const vp = app.camera.viewport;
   const rect = canvasRef.value!.getBoundingClientRect();
   // 画布中心的世界坐标在缩放前后保持不动
   const wx = (rect.width / 2 - vp.x) / vp.scale;
   const wy = (rect.height / 2 - vp.y) / vp.scale;
+  zoom.value = Math.round(scale * 100);
   app.camera.setViewport({
     x: rect.width / 2 - wx * scale,
     y: rect.height / 2 - wy * scale,
     scale,
   });
-  // setViewport 只更新相机状态，需显式触发相机-only 重渲染（与滚轮缩放一致）
   app.requestCameraRender();
+}
+
+// 渲染文档后自动适应视图：整棵导图落入视口并居中。仅缩小不放大（缩放上限 100%）：
+// 视口插件的 fit 允许放大到 8 倍，节点少的小导图会被放大到数百百分比，文档载入
+// 场景按原尺寸居中即可；工具栏手动「适应视图」保持可放大语义
+function fitScene() {
+  if (!mindmap) return;
+  mindmap.fit();
+  if (app.camera.scale > 1) setZoom(1);
+}
+
+// 缩放滑块：以画布中心为锚点缩放，范围与滚轮缩放一致（0.2–8）
+function onZoomInput(event: Event) {
+  setZoom(Number((event.target as HTMLInputElement).value) / 100);
 }
 
 // 滑块轨道填充：滑块左侧为紫色已填充段（与 AI 侧边栏同色），右侧为浅色剩余段
@@ -613,8 +625,9 @@ function mountScene(
     },
   });
   syncToolbar();
-  // 新建/切换导图默认激活根节点（selectRoot 内部等待异步初始化完成）
-  void mindmap.selectRoot();
+  // 新建/切换导图自动适应视图，随后激活根节点（selectRoot 等待异步初始化
+  // 完成后再执行 fitScene，此时整棵树已布局、包围盒可用）
+  void mindmap.selectRoot().then(() => fitScene());
   // 临时调试：暴露实例供浏览器自动化测试定位节点（验证后移除）
   (window as any).__mindmap = mindmap;
 }
