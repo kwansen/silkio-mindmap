@@ -10,11 +10,19 @@
 pnpm add silkio-mindmap
 ```
 
-`@silkor/core` 会作为依赖一并安装；若需要官方插件预设，另装 `@silkor/preset`。
+`@silkor/core` 与 `@silkor/preset` 会作为依赖一并安装（便捷装配所需）。
 
 ## 使用
 
-显式装配模式：宿主自行创建 `App`、装配官方插件（`officialPlugins()`），再把 `app` 交给场景包。本包刻意不依赖 `@silkor/preset`，便于宿主完全控制插件组合；`examples/demo-mindmap` 演示了这一用法。独立使用时建议补一层便捷入口，避免用户手工装配。
+便捷装配模式（默认）：只传画布元素，场景内部自建 `App` 并按官方预设（`officialPlugins()`）装配全部官方插件，开箱即用：
+
+```ts
+import { MindMap } from "silkio-mindmap";
+
+const mindmap = new MindMap({ canvas, data: root, onChange: (type) => { /* ... */ } });
+```
+
+显式装配模式（高级用法）：宿主自行创建 `App`、装配官方插件，再把 `app` 交给场景包，便于宿主完全控制插件组合（实现均可按契约替换）；`examples/demo-mindmap` 演示了这一用法。两种模式二选一，装配缺口由 `app.require(...)` 兜底报错。
 
 对外导出见 `src/index.ts`。`examples/demo-mindmap` 是可运行的 Astro + Vue 演示。
 

@@ -47,11 +47,15 @@ export const defaultStyle: Style = {
 };
 
 export interface MindMapOptions {
-  // 显式装配（starter-kit 模式）：传入宿主自建的 App（要求已安装官方外部插件
-  // History/Command/Viewport/Pointer/Clicker/Exporter/TextEditor/Selection，
+  // 便捷装配（默认）：传入画布元素，场景自建 App 并按官方预设装配全部官方插件
+  //（@silkor/preset 的 officialPlugins()），使用方只需依赖 silkio-mindmap，
+  // 不接触 @silkor/core / @silkor/preset
+  canvas?: HTMLCanvasElement;
+  // 显式装配（高级用法，与 canvas 二选一）：传入宿主自建的 App（要求已安装官方
+  // 外部插件 History/Command/Viewport/Pointer/Clicker/Exporter/TextEditor/Selection，
   // 通常经 @silkor/preset 的 officialPlugins()，实现均可按契约替换），
-  // MindMap 复用之并只补齐自有插件；场景包不依赖 preset，缺失能力由 require 兜底报错
-  app: App;
+  // MindMap 复用之并只补齐自有插件；装配缺口由 require 兜底报错
+  app?: App;
   data: MindMapNode;
   // 布局方向：'right' 从左往右（子节点在父节点右侧），'left' 从右往左（子节点在父节点左侧），
   // 'down' 自上而下（子节点在父节点下方水平排列，即组织结构图布局），

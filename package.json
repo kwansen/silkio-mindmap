@@ -19,7 +19,8 @@
     "version-packages": "changeset version"
   },
   "dependencies": {
-    "@silkor/core": "^0.1.0"
+    "@silkor/core": "^0.1.0",
+    "@silkor/preset": "^0.1.0"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",

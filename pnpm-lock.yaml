@@ -11,6 +11,9 @@ importers:
       '@silkor/core':
         specifier: ^0.1.0
         version: 0.1.0
+      '@silkor/preset':
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@changesets/changelog-github':
         specifier: ^1.0.1

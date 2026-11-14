@@ -13,6 +13,7 @@ import { EXPORT_CAPABILITY, COMMAND_CAPABILITY, POINTER_CAPABILITY } from "@silk
 import { CANVAS_CLICK_CAPABILITY } from "@silkor/core";
 import { CLIPBOARD_CAPABILITY } from "@silkor/core";
 import type { ClipboardCapability } from "@silkor/core";
+import { officialPlugins } from "@silkor/preset";
 import { BuiltinTreeLayout } from "./layout";
 import { AUTO_LAYOUT_CAPABILITY } from "./auto-layout";
 import type { AutoLayoutCapability } from "./auto-layout";
@@ -41,8 +42,13 @@ import type {
 // 内聚逻辑拆分在同目录各模块（model/drop/collapse/editing/operations/keyboard/drag），
 // 依赖单向：drag/keyboard/operations/editing/collapse → model(MindTree) → Edge/core
 export class MindMap {
-  // 装配与渲染属主：私有——外部经门面语义 API 消费，装配期定制经 MindMapOptions.app 传入
+  // 装配与渲染属主：私有——外部经门面语义 API 消费。便捷模式下由场景自建
+  // （默认），显式装配时经 MindMapOptions.app 传入
   private app: App;
+  // 便捷模式下场景自建宿主并安装的官方预设插件：destroy 时对称卸载；
+  // 显式装配下为空（宿主插件属宿主所有，保持在线可复用）
+  private hostPlugins: Plugin[] = [];
+  private ownsApp = false;
   // 视口能力（Viewport 插件 install 时注册）：按能力接口消费平移入口，不依赖具体插件实例
   private pan: ViewportCapability | null;
   // 文本编辑能力（TextEditor 插件 install 时注册）：按能力接口消费，不依赖具体插件实例
@@ -110,11 +116,20 @@ export class MindMap {
     this.levelGap = options.levelGap ?? 48;
     this.siblingGap = options.siblingGap ?? 12;
     this.onChange = options.onChange;
-    // 显式装配（starter-kit 模式）：宿主自建 App 并装配官方外部插件（通常用
-    // @silkor/preset 的 officialPlugins()，实现均可按契约替换），本场景只补齐
-    // 自有插件（BuiltinTreeLayout 等）并接线场景回调；
-    // 场景包不依赖 preset，装配缺口由下方 require 兜底报错
-    this.app = options.app;
+    // 装配模式二选一：便捷模式（默认）传 canvas，场景自建 App 并按官方预设装配，
+    // 使用方无需接触 @silkor/core / @silkor/preset；显式装配传宿主自建并装配好
+    // 官方插件的 App，本场景只补齐自有插件并接线场景回调，
+    // 装配缺口由下方 require 兜底报错
+    if (options.app) {
+      this.app = options.app;
+    } else if (options.canvas) {
+      this.app = new App(options.canvas);
+      this.ownsApp = true;
+      this.hostPlugins = officialPlugins();
+      for (const p of this.hostPlugins) this.app.use(p);
+    } else {
+      throw new Error("[MindMap] 需要提供 canvas（便捷模式）或 app（显式装配）之一");
+    }
     // 按能力键显式依赖（require 兜底装配错误，只认能力名与契约，不认插件实例）
     this.history = this.app.require(HISTORY_CAPABILITY);
     this.commands = this.app.require(COMMAND_CAPABILITY);
@@ -673,5 +688,11 @@ export class MindMap {
     this.app.remove(this.collapseToggle);
     for (const p of this.scenePlugins) this.app.uninstall(p);
     this.scenePlugins = [];
+    // 便捷模式：自建宿主上的官方预设插件也随场景卸载（撤销 DOM 事件监听、
+    // 编辑器元素等）；显式装配下的宿主插件属宿主所有，保持在线可复用
+    if (this.ownsApp) {
+      for (const p of this.hostPlugins) this.app.uninstall(p);
+      this.hostPlugins = [];
+    }
   }
 }
