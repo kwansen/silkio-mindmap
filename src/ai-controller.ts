@@ -630,7 +630,7 @@ export class AIEditingPlugin implements Plugin {
   install(app: App) {
     app.provide(AI_EDITING_CAPABILITY, this.controller, {
       version: "1.0.0",
-      provider: "@silkor/mindmap/ai",
+      provider: "silkio-mindmap/ai",
     });
   }
 }

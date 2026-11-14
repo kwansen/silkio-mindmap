@@ -20,7 +20,7 @@ import {
   type AIEditTurn,
   type MindMapNode,
   type Style,
-} from "@silkor/mindmap";
+} from "silkio-mindmap";
 import { Markdown } from "@comark/vue";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import Undo from "../icons/Undo.vue";
@@ -144,7 +144,7 @@ const canRedo = ref(false);
 // 复制 JSON 成功后的短暂反馈
 const copied = ref(false);
 
-// ---- AI 编辑（@silkor/mindmap AIEditingPlugin + OpenAI 兼容接口，对话式侧边栏）----
+// ---- AI 编辑（silkio-mindmap AIEditingPlugin + OpenAI 兼容接口，对话式侧边栏）----
 // 聊天消息流：历史对话保留在内存，不随单次对话丢失
 interface AIChatMessage {
   id: number;

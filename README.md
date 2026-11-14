@@ -1,13 +1,13 @@
 # mindmap
 
-基于 [silkor](../) 画布内核的 思维导图 场景包，包名 `@silkor/mindmap`。
+基于 [silkor](../) 画布内核的 思维导图 场景包，包名 `silkio-mindmap`。
 
 三个开源仓各司其职：`silkor` 提供内核与官方插件，`mindmap` 与 `flowchart` 是两个互不依赖的场景实现。本仓不依赖 `flowchart`。
 
 ## 安装
 
 ```sh
-pnpm add @silkor/mindmap
+pnpm add silkio-mindmap
 ```
 
 `@silkor/core` 会作为依赖一并安装；若需要官方插件预设，另装 `@silkor/preset`。

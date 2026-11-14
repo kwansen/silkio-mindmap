@@ -30,7 +30,7 @@ importers:
       '@silkor/core':
         specifier: ^0.1.0
         version: 0.1.0
-      '@silkor/mindmap':
+      'silkio-mindmap':
         specifier: workspace:*
         version: link:../..
       '@silkor/preset':

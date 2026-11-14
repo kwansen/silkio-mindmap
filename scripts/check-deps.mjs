@@ -1,7 +1,7 @@
 // mindmap 仓架构守护（由原 monorepo 的 scripts/check-deps.mjs 拆分而来）
-// 1. 只允许依赖 @silkor/core / @silkor/preset / @silkor/mindmap
+// 1. 只允许依赖 @silkor/core / @silkor/preset / silkio-mindmap
 // 2. 禁止直接依赖 @silkor/plugin-*：官方插件清单以 @silkor/preset 为单一事实来源
-// 3. 禁止依赖另一个场景仓 @silkor/flowchart（两个场景必须彼此独立）
+// 3. 禁止依赖另一个场景仓 silkio-flowchart（两个场景必须彼此独立）
 // 4. 所有 import 的 @silkor/* 包必须显式声明在 dependencies / devDependencies
 // 用法：pnpm check:deps
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -9,12 +9,12 @@ import { extname, join, relative } from "node:path";
 
 const root = process.cwd();
 const errors = [];
-const PKG = "@silkor/mindmap";
-const OTHER_PKG = "@silkor/flowchart";
+const PKG = "silkio-mindmap";
+const OTHER_PKG = "silkio-flowchart";
 const ALLOWED = new Set(["@silkor/core", "@silkor/preset", PKG]);
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".vue", ".js", ".mjs", ".astro"]);
 const SKIP = new Set(["node_modules", "dist", ".astro", ".git"]);
-const IMPORT_RE = /from\s+['"](@silkor\/[^'"]+)['"]/g;
+const IMPORT_RE = /from\s+['"]((?:@silkor\/|silkio-mindmap)[^'"]*)['"]/g;
 
 function sourceFiles(dir) {
   const out = [];
@@ -40,7 +40,7 @@ for (const unit of units) {
   const pkgJson = JSON.parse(readFileSync(join(unit.dir, "package.json"), "utf8"));
   const declared = new Set(
     [...Object.keys(pkgJson.dependencies ?? {}), ...Object.keys(pkgJson.devDependencies ?? {})]
-      .filter((d) => d.startsWith("@silkor/")),
+      .filter((d) => d.startsWith("@silkor/") || d === PKG),
   );
 
   for (const d of declared) {
