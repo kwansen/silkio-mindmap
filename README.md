@@ -37,4 +37,4 @@ pnpm test
 
 ## License
 
-ISC
+MIT
