@@ -17,9 +17,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # 依赖 @silkor/* 正式版本，从 npm 拉取（silkor 已发布 0.1.0）。
-      # 首次安装会生成 pnpm-lock.yaml，提交后改为 --frozen-lockfile。
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm check:deps
       - run: pnpm build
       - run: pnpm test
