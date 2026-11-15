@@ -1105,9 +1105,10 @@ onUnmounted(() => {
         <button
           class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100"
           title="收起"
+          aria-label="收起"
           @click="aiSidebarOpen = false"
         >
-          <Icon name="i-chevron-down" class="h-4 w-4" />
+          <Icon name="i-chevron-right" class="h-4 w-4" />
         </button>
       </div>
 
@@ -1172,10 +1173,7 @@ onUnmounted(() => {
           v-if="!aiMessages.length && !aiPending"
           class="mt-10 text-center text-xs leading-5 text-gray-400"
         >
-          输入编辑指令或提问，如：<br />围绕前端展开 / 把矩阵移到线性代数下 /
-          这个导图讲了什么<br />
-          撤销上一步 / 重做 / 我刚才改了什么<br />同名节点用路径定位，如
-          "线性代数/矩阵"
+          输入指令，如：展开「前端」 / 撤销上一步
         </div>
 
         <div v-for="m in aiMessages" :key="m.id">
@@ -1323,28 +1321,10 @@ onUnmounted(() => {
           role="dialog"
           aria-label="导图列表"
         >
-          <!-- 头部：标题 + 数量徽标 + 关闭 -->
+          <!-- 头部：排序切换 + 关闭 -->
           <div
-            class="flex items-center gap-2 border-b border-gray-100 px-5 py-3.5"
+            class="flex items-center gap-2 border-b border-gray-100 px-4 py-3"
           >
-            <span class="text-sm font-semibold text-gray-900">我的导图</span>
-            <span
-              class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] leading-4 text-gray-500"
-            >
-              {{ sortedDocs.length }}
-            </span>
-            <button
-              class="ml-auto flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-              title="关闭"
-              aria-label="关闭"
-              @click="docsOpen = false"
-            >
-              <Icon name="i-close" class="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <!-- 排序：分段控件，点击切换升降序 -->
-          <div class="px-4 pt-3">
             <div class="inline-flex items-center rounded-lg bg-gray-100 p-0.5">
               <button
                 v-for="key in ['createdAt', 'updatedAt'] as const"
@@ -1363,6 +1343,14 @@ onUnmounted(() => {
                 }}</span>
               </button>
             </div>
+            <button
+              class="ml-auto flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              title="关闭"
+              aria-label="关闭"
+              @click="docsOpen = false"
+            >
+              <Icon name="i-close" class="h-3.5 w-3.5" />
+            </button>
           </div>
 
           <!-- 导图列表：OverlayScrollbars 自定义滚动条 -->
@@ -1419,21 +1407,10 @@ onUnmounted(() => {
             </div>
             <div v-if="!sortedDocs.length" class="py-10 text-center">
               <Icon name="i-file" class="mx-auto mb-2 h-8 w-8 text-gray-200" />
-              <div class="text-xs text-gray-400">还没有导图，点击下方按钮新建</div>
+              <div class="text-xs text-gray-400">还没有导图，点击左上角「+」新建</div>
             </div>
             </div>
           </OverlayScrollbarsComponent>
-
-          <!-- 底部：新建 -->
-          <div class="border-t border-gray-100 p-3">
-            <button
-              class="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-violet-500 text-xs font-medium text-white transition-colors hover:bg-violet-600"
-              @click="createNew()"
-            >
-              <Icon name="i-plus" class="h-3.5 w-3.5" />
-              新建导图
-            </button>
-          </div>
         </div>
       </div>
     </Transition>
