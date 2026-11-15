@@ -1457,7 +1457,7 @@ onUnmounted(() => {
               <div class="text-xs text-gray-400">还没有导图，点击左上角「+」新建</div>
             </div>
             </div>
-          </OverlayScrollbarsComponent>
+          </OverlayScrollbarsComponent> 
         </div>
       </div>
     </Transition>
