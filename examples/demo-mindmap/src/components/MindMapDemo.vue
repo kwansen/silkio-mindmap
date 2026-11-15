@@ -53,6 +53,9 @@ const docs = ref<MindMapDoc[]>([]);
 // 当前打开的文档 id 与名称；空 id 表示尚未打开（首帧）
 const currentId = ref("");
 const docName = ref("");
+// 首个文档是否已从 IndexedDB 定位：标题在此前渲染骨架占位，
+// 避免「未命名标题 → 真实标题」的读库闪变
+const docReady = ref(false);
 // 自动保存防抖定时器与当前文档建档时间
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let docCreatedAt = 0;
@@ -361,6 +364,8 @@ onMounted(async () => {
     // 首次使用：以示例数据创建首个文档
     createNew(sampleData);
   }
+  // 首个文档已定位：标题从骨架占位切换为真实名称，避免"未命名标题"闪变
+  docReady.value = true;
 });
 
 onUnmounted(() => {
@@ -385,6 +390,7 @@ onUnmounted(() => {
         :docs="docs"
         :current-id="currentId"
         :doc-name="docName"
+        :ready="docReady"
         @create="createNew()"
         @open="openDoc"
         @remove="removeDoc"

@@ -10,6 +10,9 @@ const props = defineProps<{
   docs: MindMapDoc[];
   currentId: string;
   docName: string;
+  // 首个文档是否已定位（宿主完成 IndexedDB 初始化）：此前标题渲染骨架占位，
+  // 避免「未命名标题 → 真实标题」的读库闪变
+  ready?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -65,7 +68,13 @@ function formatTime(ts: number) {
       @click="dialogOpen = true"
     >
       <Icon name="i-file" class="h-4 w-4 text-gray-500" />
-      <span class="max-w-40 truncate text-xs text-gray-800">
+      <!-- 读库完成前显示骨架占位：占位条与文字同高，就绪后无跳变地替换为真实标题 -->
+      <span
+        v-if="!props.ready"
+        class="h-3 w-20 animate-pulse rounded bg-gray-200"
+        aria-hidden="true"
+      ></span>
+      <span v-else class="max-w-40 truncate text-xs text-gray-800">
         {{ docName || "未命名标题" }}
       </span>
       <Icon name="i-chevron-down" class="h-3 w-3 text-gray-400" />
