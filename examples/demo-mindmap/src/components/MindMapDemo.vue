@@ -523,7 +523,7 @@ function syncToolbar() {
 
 // ---- 工具条悬浮面板：悬浮 200ms 延迟展开（hover intent），移出立即收起 ----
 // 纯 CSS group-hover 过于灵敏，鼠标划过工具条即弹面板易误触；改为定时器延迟
-type ToolbarMenu = "layout" | "edge" | "export" | "zoom";
+type ToolbarMenu = "fold" | "layout" | "edge" | "export" | "zoom";
 const openMenu = ref<ToolbarMenu | null>(null);
 let menuTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleMenu(menu: ToolbarMenu) {
@@ -561,6 +561,20 @@ async function undo() {
 async function redo() {
   if (!mindmap) return;
   await mindmap.redo();
+  syncToolbar();
+}
+
+// 折叠其他：除选中节点及其祖先链外全部折叠（无选中时折叠全部，根节点保留）
+async function collapseOthers() {
+  if (!mindmap) return;
+  await mindmap.collapseOthers();
+  syncToolbar();
+}
+
+// 展开全部：清空整树折叠标志，恢复全部子树可见
+async function expandAll() {
+  if (!mindmap) return;
+  await mindmap.expandAll();
   syncToolbar();
 }
 
@@ -985,13 +999,46 @@ onUnmounted(() => {
           <Icon name="i-fit" class="block h-4 w-4" />
         </button>
         <button
-          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+          class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
           title="居中"
           aria-label="居中"
           @click="center"
         >
           <Icon name="i-center" class="block h-4 w-4" />
         </button>
+        <!-- 折叠 / 展开：折叠其他（无选中时折叠全部）与展开全部 -->
+        <div
+          class="relative"
+          @mouseenter="scheduleMenu('fold')"
+          @mouseleave="closeMenu"
+        >
+          <button
+            class="flex h-8 w-8 cursor-pointer items-center justify-center whitespace-nowrap rounded-md text-sm text-gray-800 hover:bg-gray-100"
+            title="折叠 / 展开"
+            aria-label="折叠 / 展开"
+          >
+            <Icon name="i-collapse-others" class="block h-4 w-4" />
+          </button>
+          <div
+            class="absolute top-[calc(100%+10px)] right-0 z-20 min-w-24 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
+            :class="openMenu === 'fold' ? 'flex' : 'hidden'"
+          >
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              title="折叠除选中分支外的节点，无选中时折叠全部"
+              @click="collapseOthers"
+            >
+              折叠其他
+            </button>
+            <button
+              class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+              title="展开全部折叠节点"
+              @click="expandAll"
+            >
+              展开全部
+            </button>
+          </div>
+        </div>
         <span class="mx-0.5 h-4 w-px bg-gray-200"></span>
 
         <!-- 导出：复制 JSON / 下载 JSON / 导出图片 -->
@@ -1173,7 +1220,7 @@ onUnmounted(() => {
           v-if="!aiMessages.length && !aiPending"
           class="mt-10 text-center text-xs leading-5 text-gray-400"
         >
-          输入指令，如：展开「前端」 / 撤销上一步
+          输入指令，如：绘制一本书的要点 / 撤销上一步
         </div>
 
         <div v-for="m in aiMessages" :key="m.id">

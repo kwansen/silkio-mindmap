@@ -98,6 +98,8 @@ export class MindMap {
   private cleanups: Array<() => void> = [];
   // 已拆卸标志：destroy 后 init 不再挂载节点（init 为异步，可能与 destroy 竞争）
   private destroyed = false;
+  // 选中变化订阅（onSelectionChange 注册）：宿主据此刷新工具条可用态等外部 UI
+  private selectionListeners = new Set<(hasSelection: boolean) => void>();
   // 异步初始化 promise：构造函数无法 await，宿主可在 ready 落定后安全操作场景
   // （如 selectRoot 选中根节点）
   private ready: Promise<void>;
@@ -238,6 +240,11 @@ export class MindMap {
       if (hits.length) this.activation.setSelection(hits);
     };
     this.sel = sel;
+    // 选中变化分发（能力单槽回调 → 多路订阅）：has 表示当前是否有选中节点
+    sel.onChange = () => {
+      const has = sel.items.length > 0;
+      for (const cb of this.selectionListeners) cb(has);
+    };
     // 激活高亮环挂载在最上层（init 中节点与连线加入后再 add）
     this.highlight = new ActiveHighlight();
     // 拖拽反馈层（绘制在高亮环之上）；从右向左布局时落点连线锚点左右互换，
@@ -421,6 +428,76 @@ export class MindMap {
     const visible = all.filter((n) => n.visible);
     if (!visible.length) return;
     this.activation.setSelection(visible);
+  }
+
+  // 折叠其他：除选中节点及其祖先链外，全部可见的有子节点折叠（子树隐藏）。
+  // 祖先链必须保留——折叠任一祖先会把选中节点所在子树一并藏掉；多选时保留
+  // 全部选中节点及其祖先。无选中时视为折叠全部：只保留根节点（折叠根会隐藏
+  // 全部节点，无意义）。只动当前可见节点：已隐藏子树内的折叠态不属本次语义
+  //（展开后再操作）。无可折叠节点时无操作（返回 false）。
+  // 折叠不入撤销栈（与折叠开关点击 toggle 同语义），结果经 onChange("collapse")
+  // 通知宿主，随 toJSON 持久化
+  async collapseOthers(): Promise<boolean> {
+    if (this.busy) return false;
+    const root = this.model.root;
+    if (!root) return false;
+    // 保留集合：根节点 + 每个选中节点沿 parent 链到根的祖先
+    const keep = new Set<Text>([root]);
+    for (const item of this.sel.items) {
+      let n: Text | null = item;
+      while (n && !keep.has(n)) {
+        keep.add(n);
+        n = n.parent as Text | null;
+      }
+    }
+    const all: Text[] = [];
+    this.model.collectTexts(root, all);
+    const targets = all.filter(
+      (n) => n.visible && n.children.length > 0 && !n.collapsed && !keep.has(n),
+    );
+    if (!targets.length) return false;
+    for (const n of targets) {
+      n.collapsed = true;
+      this.collapse.hoverToggles.delete(n);
+    }
+    await this.relayout();
+    this.emitChange("collapse");
+    return true;
+  }
+
+  // 展开全部：清空整树折叠标志，全部子树恢复可见。无可折叠节点时无操作
+  // （返回 false）。与折叠其他同语义：不入撤销栈，结果经 onChange("collapse")
+  // 通知宿主，随 toJSON 持久化
+  async expandAll(): Promise<boolean> {
+    if (this.busy) return false;
+    const root = this.model.root;
+    if (!root) return false;
+    const all: Text[] = [];
+    this.model.collectTexts(root, all);
+    const targets = all.filter((n) => n.collapsed);
+    if (!targets.length) return false;
+    for (const n of targets) {
+      n.collapsed = false;
+      this.collapse.hoverToggles.delete(n);
+    }
+    await this.relayout();
+    this.emitChange("collapse");
+    return true;
+  }
+
+  // 是否有选中节点（只读快照）
+  get hasSelection(): boolean {
+    return this.sel.items.length > 0;
+  }
+
+  // 订阅选中变化（参数为"当前是否有选中节点"，注册时先回调一次当前值），
+  // 返回退订函数
+  onSelectionChange(cb: (hasSelection: boolean) => void): () => void {
+    this.selectionListeners.add(cb);
+    cb(this.hasSelection);
+    return () => {
+      this.selectionListeners.delete(cb);
+    };
   }
 
   // 选中根节点：等待异步初始化完成后进入单选激活态（高亮环 + 方向键导航可用），
@@ -669,6 +746,7 @@ export class MindMap {
     this.sel.onMarqueeStart = null;
     this.sel.onMarqueeMove = null;
     this.sel.onMarqueeEnd = null;
+    this.sel.onChange = null;
     this.app.require(CANVAS_CLICK_CAPABILITY).onBlankClick(null);
     for (const id of [
       "mindmap.undo",

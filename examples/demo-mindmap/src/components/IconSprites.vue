@@ -38,6 +38,16 @@
       <line x1="2" y1="12" x2="6" y2="12" />
       <line x1="18" y1="12" x2="22" y2="12" />
     </symbol>
+    <!-- 折叠其他：左侧节点三条分支，中间分支保留（选中节点），上下分支折叠成点 -->
+    <symbol id="i-collapse-others" viewBox="0 0 24 24" stroke-width="1">
+      <rect x="2.5" y="9.5" width="5.5" height="5" rx="1" />
+      <path d="M8 12h4.5" />
+      <rect x="12.5" y="10" width="7.5" height="4" rx="1" />
+      <path d="M8 5.5h5" />
+      <circle cx="14.5" cy="5.5" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M8 18.5h5" />
+      <circle cx="14.5" cy="18.5" r="1.3" fill="currentColor" stroke="none" />
+    </symbol>
     <symbol id="i-export" viewBox="0 0 24 24" stroke-width="1">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />

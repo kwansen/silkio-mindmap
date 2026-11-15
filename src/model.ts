@@ -71,6 +71,10 @@ export class MindTree {
     for (const e of edges) {
       invariant(!this._edgeSet.has(e), "mountEdges: 连线已在连线表中（重复挂载）");
       this._edgeSet.add(e);
+      // 可见性入表即按端点对齐（applyCollapseVisibility 的同一规则）：新建连线
+      // 默认可见，而 init（数据自带折叠态）等路径挂载晚于可见性联动、折叠子树内
+      // 的端点已不可见——不在此落标志，折叠里的连线会以幽灵连线渲染出来
+      e.visible = e.fromNode.visible && e.toNode.visible;
     }
     this._edges.push(...edges);
     this.app?.add(edges);

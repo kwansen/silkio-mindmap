@@ -139,3 +139,21 @@ describe("MindTree.applyCollapseVisibility", () => {
     expect(e3.visible).toBe(true);
   });
 });
+
+describe("MindTree.mountEdges", () => {
+  it("挂载时按端点对齐可见性：折叠子树内的连线不渲染（init 数据自带折叠态回归）", () => {
+    const g = f("g");
+    const c1 = f("c1", [g], true);
+    const root = f("r", [c1]);
+    const tree = newTree();
+    tree.root = asT(root);
+    // 模拟 init 顺序：先按折叠标志联动可见性（节点隐藏、连线表尚空），后挂载连线
+    tree.applyCollapseVisibility();
+    expect(g.visible).toBe(false);
+    const e1 = { fromNode: root, toNode: c1, visible: true };
+    const e2 = { fromNode: c1, toNode: g, visible: true };
+    tree.mountEdges([e1, e2] as unknown as MindEdge[]);
+    expect(e1.visible).toBe(true);
+    expect(e2.visible).toBe(false);
+  });
+});
