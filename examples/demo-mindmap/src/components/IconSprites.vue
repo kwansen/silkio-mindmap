@@ -38,15 +38,21 @@
       <line x1="2" y1="12" x2="6" y2="12" />
       <line x1="18" y1="12" x2="22" y2="12" />
     </symbol>
+    <!-- 折叠/展开菜单触发按钮：双 V 形指向中心（折叠方向的通用字形），
+         只表达「折叠类操作」分组，不绑定具体动作 -->
+    <symbol id="i-fold" viewBox="0 0 24 24" stroke-width="1">
+      <polyline points="7 4.5 12 9.5 17 4.5" />
+      <polyline points="7 19.5 12 14.5 17 19.5" />
+    </symbol>
     <!-- 折叠其他：左侧节点三条分支，中间分支保留（选中节点），上下分支折叠成点 -->
     <symbol id="i-collapse-others" viewBox="0 0 24 24" stroke-width="1">
-      <rect x="2.5" y="9.5" width="5.5" height="5" rx="1" />
-      <path d="M8 12h4.5" />
-      <rect x="12.5" y="10" width="7.5" height="4" rx="1" />
-      <path d="M8 5.5h5" />
-      <circle cx="14.5" cy="5.5" r="1.3" fill="currentColor" stroke="none" />
-      <path d="M8 18.5h5" />
-      <circle cx="14.5" cy="18.5" r="1.3" fill="currentColor" stroke="none" />
+     <polyline points="7 4.5 12 9.5 17 4.5" />
+      <polyline points="7 19.5 12 14.5 17 19.5" />
+    </symbol>
+    <!-- 展开全部：双 V 形指向外侧，与 i-fold 的向内收形成方向对照 -->
+    <symbol id="i-expand-all" viewBox="0 0 24 24" stroke-width="1">
+      <polyline points="7 9.5 12 4.5 17 9.5" />
+      <polyline points="7 14.5 12 19.5 17 14.5" />
     </symbol>
     <symbol id="i-export" viewBox="0 0 24 24" stroke-width="1">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

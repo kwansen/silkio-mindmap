@@ -189,24 +189,26 @@ const zoomTrackStyle = computed(() => {
         title="折叠 / 展开"
         aria-label="折叠 / 展开"
       >
-        <Icon name="i-collapse-others" class="block h-4 w-4" />
+        <Icon name="i-fold" class="block h-4 w-4" />
       </button>
       <div
         class="absolute top-[calc(100%+10px)] right-0 z-20 min-w-24 flex-col rounded-lg bg-white p-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:content-['']"
         :class="openMenu === 'fold' ? 'flex' : 'hidden'"
       >
         <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          class="flex w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
           title="折叠除选中分支外的节点，无选中时折叠全部"
           @click="emit('collapse-others')"
         >
+          <Icon name="i-collapse-others" class="h-3.5 w-3.5 text-gray-400" />
           折叠其他
         </button>
         <button
-          class="w-full cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
+          class="flex w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100"
           title="展开全部折叠节点"
           @click="emit('expand-all')"
         >
+          <Icon name="i-expand-all" class="h-3.5 w-3.5 text-gray-400" />
           展开全部
         </button>
       </div>
