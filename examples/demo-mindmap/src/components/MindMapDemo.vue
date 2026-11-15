@@ -24,6 +24,8 @@ import { Markdown } from "@comark/vue";
 import { listDocs, getDoc, putDoc, deleteDoc, type MindMapDoc } from "../idb";
 import IconSprites from "./IconSprites.vue";
 import Icon from "./Icon.vue";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-vue";
+import type { OverlayScrollbarsComponentRef } from "overlayscrollbars-vue";
 
 type LayoutDirection = "left" | "right" | "down" | "both";
 
@@ -125,7 +127,12 @@ const aiBusy = ref(false);
 // 当前 AI 请求的中止控制器：停止按钮 abort 它以取消进行中的生成（fetch 与流式读取一并中断）
 let aiAbort: AbortController | null = null;
 const aiSettingsOpen = ref(false);
-const chatBox = ref<HTMLDivElement | null>(null);
+// 消息流滚动容器（OverlayScrollbars 组件引用，自动跟随底部时经实例取 viewport 元素）
+const chatBox = ref<OverlayScrollbarsComponentRef | null>(null);
+// OverlayScrollbars 统一配置：滚动/悬浮时显示、静止后自动隐藏
+const osOptions = {
+  scrollbars: { autoHide: "move" as const, autoHideDelay: 500 },
+};
 
 // AI 服务配置（运行时在面板设置弹层里填写，持久化到 localStorage，不入代码仓库）。
 // format：openai = OpenAI Chat Completions 兼容接口（DeepSeek/通义/Kimi/OpenAI 等
@@ -149,8 +156,8 @@ watch(
   [aiMessages, aiPending],
   async () => {
     await nextTick();
-    const box = chatBox.value;
-    if (box) box.scrollTop = box.scrollHeight;
+    const viewport = chatBox.value?.osInstance()?.elements().viewport;
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
   },
   { deep: true },
 );
@@ -1153,8 +1160,14 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 消息流 -->
-      <div ref="chatBox" class="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <!-- 消息流：OverlayScrollbars 自定义滚动条，内部包装层承载原布局 -->
+      <OverlayScrollbarsComponent
+        ref="chatBox"
+        element="div"
+        class="flex min-h-0 flex-1"
+        :options="osOptions"
+      >
+        <div class="flex flex-col gap-3 p-3">
         <div
           v-if="!aiMessages.length && !aiPending"
           class="mt-10 text-center text-xs leading-5 text-gray-400"
@@ -1268,7 +1281,8 @@ onUnmounted(() => {
             {{ isOpsStream(aiPending.content) ? "执行操作中…" : "思考中…" }}
           </div>
         </div>
-      </div>
+        </div>
+      </OverlayScrollbarsComponent>
 
       <!-- 输入区 -->
       <div class="flex items-center gap-2 border-t border-gray-100 p-2.5">
@@ -1351,10 +1365,13 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 导图列表 -->
-          <div
-            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2.5 py-2.5"
+          <!-- 导图列表：OverlayScrollbars 自定义滚动条 -->
+          <OverlayScrollbarsComponent
+            element="div"
+            class="flex min-h-0 flex-1"
+            :options="osOptions"
           >
+            <div class="flex flex-col gap-1 px-2.5 py-2.5">
             <div
               v-for="d in sortedDocs"
               :key="d.id"
@@ -1404,7 +1421,8 @@ onUnmounted(() => {
               <Icon name="i-file" class="mx-auto mb-2 h-8 w-8 text-gray-200" />
               <div class="text-xs text-gray-400">还没有导图，点击下方按钮新建</div>
             </div>
-          </div>
+            </div>
+          </OverlayScrollbarsComponent>
 
           <!-- 底部：新建 -->
           <div class="border-t border-gray-100 p-3">
